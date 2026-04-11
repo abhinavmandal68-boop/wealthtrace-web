@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ice-blue: #f0f7ff;
+}
+
+/* This ensures Tailwind resets the browser's ugly default buttons */
+@layer base {
+  button {
+    cursor: pointer;
+  }
+}
