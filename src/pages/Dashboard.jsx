@@ -17,17 +17,31 @@ const glassCard = {
   boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)",
 };
 
-const CATEGORIES = ["Rent", "Food", "Utilities", "Entertainment", "Transport", "Shopping", "Health", "Other"];
+const EXPENSE_CATEGORIES = ["Rent", "Food", "Utilities", "Entertainment", "Transport", "Shopping", "Health", "Other"];
+const INCOME_CATEGORIES  = ["Salary", "Freelance", "Business", "Investment", "Bonus", "Gift", "Refund", "Other"];
+
+// Long press hook for mobile
+function useLongPress(callback, ms = 500) {
+  const timerRef = { current: null };
+  const start = () => { timerRef.current = setTimeout(callback, ms); };
+  const stop  = () => { clearTimeout(timerRef.current); };
+  return { onMouseDown: start, onMouseUp: stop, onMouseLeave: stop, onTouchStart: start, onTouchEnd: stop };
+}
 
 export default function Dashboard() {
   const [amount, setAmount] = useState("");
   const [type, setType] = useState("expense");
   const [category, setCategory] = useState("Food");
+  const activeCategories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
   const [desc, setDesc] = useState("");
+  const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const [txnDate, setTxnDate] = useState(todayStr);
   const [transactions, setTransactions] = useState([]);
   const [showSuccess, setShowSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [filterMonth, setFilterMonth] = useState("All");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectMode, setSelectMode] = useState(false);
 
   const user = auth.currentUser;
 
@@ -46,12 +60,14 @@ export default function Dashboard() {
   const addTransaction = async () => {
     const val = Number(amount);
     if (!val || isNaN(val) || val <= 0) return;
+    const chosenDate = new Date(txnDate + "T12:00:00"); // noon to avoid timezone issues
     await addDoc(collection(db, "transactions"), {
       amount: val, type, category, desc,
       userId: user.uid,
-      createdAt: serverTimestamp(),
+      createdAt: { seconds: Math.floor(chosenDate.getTime() / 1000), nanoseconds: 0 },
+      bankDate: txnDate,
     });
-    setAmount(""); setDesc("");
+    setAmount(""); setDesc(""); setTxnDate(todayStr);
     setShowSuccess(true);
     setTimeout(() => { setShowSuccess(false); setActiveTab("dashboard"); }, 2000);
   };
@@ -268,6 +284,34 @@ export default function Dashboard() {
     await batch.commit();
   };
 
+  // Toggle single selection
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  // Toggle select all
+  const toggleSelectAll = () => {
+    if (selectedIds.size === transactions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(transactions.map(t => t.id)));
+    }
+  };
+
+  // Delete selected
+  const deleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    const batch = writeBatch(db);
+    selectedIds.forEach(id => batch.delete(doc(db, "transactions", id)));
+    await batch.commit();
+    setSelectedIds(new Set());
+    setSelectMode(false);
+  };
+
   // Computed
   const months = ["All", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const filtered = filterMonth === "All" ? transactions : transactions.filter(t => {
@@ -287,7 +331,7 @@ export default function Dashboard() {
     return acc;
   }, []).slice(-10);
 
-  const pieData = CATEGORIES.map(cat => ({
+  const pieData = EXPENSE_CATEGORIES.map(cat => ({
     name: cat,
     value: filtered.filter(t => t.category === cat && t.type === "expense").reduce((s, t) => s + t.amount, 0),
   })).filter(d => d.value > 0);
@@ -336,6 +380,15 @@ export default function Dashboard() {
         .field-input { width:100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 16px; color: white; font-family:'Outfit',sans-serif; font-size:15px; font-weight:500; outline:none; transition: border-color 0.2s; }
         .field-input:focus { border-color: rgba(167,139,250,0.5); background: rgba(255,255,255,0.07); }
         .field-input::placeholder { color: rgba(255,255,255,0.2); }
+        input[type="date"]::-webkit-calendar-picker-indicator {
+          filter: invert(0.6);
+          cursor: pointer;
+          border-radius: 4px;
+          padding: 2px;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover {
+          filter: invert(0.9);
+        }
         .toggle-opt { flex:1; padding: 10px; border: none; border-radius: 10px; font-family:'Outfit',sans-serif; font-size:13px; font-weight:600; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; }
         .tx-row { display:flex; justify-content:space-between; align-items:center; padding: 14px 18px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; transition: all 0.2s; }
         .tx-row:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12); }
@@ -536,15 +589,33 @@ export default function Dashboard() {
               <div style={{ marginBottom:"20px" }}>
                 <label className="field-label">Type</label>
                 <div style={{ display:"flex", gap:"6px", background:"rgba(255,255,255,0.04)", borderRadius:"12px", padding:"4px" }}>
-                  <button className="toggle-opt" onClick={() => setType("expense")}
+                  <button className="toggle-opt" onClick={() => { setType("expense"); setCategory("Food"); }}
                     style={{ background: type === "expense" ? "rgba(248,113,113,0.15)" : "transparent", color: type === "expense" ? "#f87171" : "rgba(255,255,255,0.3)", border: type === "expense" ? "1px solid rgba(248,113,113,0.2)" : "1px solid transparent" }}>
                     Expense
                   </button>
-                  <button className="toggle-opt" onClick={() => setType("income")}
+                  <button className="toggle-opt" onClick={() => { setType("income"); setCategory("Salary"); }}
                     style={{ background: type === "income" ? "rgba(52,211,153,0.15)" : "transparent", color: type === "income" ? "#34d399" : "rgba(255,255,255,0.3)", border: type === "income" ? "1px solid rgba(52,211,153,0.2)" : "1px solid transparent" }}>
                     Income
                   </button>
                 </div>
+              </div>
+
+              {/* Date */}
+              <div style={{ marginBottom:"20px" }}>
+                <label className="field-label">Transaction Date</label>
+                <input
+                  className="field-input"
+                  type="date"
+                  value={txnDate}
+                  max={todayStr}
+                  onChange={e => setTxnDate(e.target.value)}
+                  style={{ colorScheme:"dark", cursor:"pointer" }}
+                />
+                {txnDate !== todayStr && (
+                  <p style={{ fontSize:"11px", color:"rgba(167,139,250,0.7)", marginTop:"6px", fontWeight:"500" }}>
+                    Recording past transaction for {new Date(txnDate + "T12:00:00").toLocaleDateString("en-IN", { day:"2-digit", month:"long", year:"numeric" })}
+                  </p>
+                )}
               </div>
 
               {/* Amount */}
@@ -563,7 +634,7 @@ export default function Dashboard() {
               <div style={{ marginBottom:"20px" }}>
                 <label className="field-label">Category</label>
                 <select className="field-input" value={category} onChange={e => setCategory(e.target.value)}>
-                  {CATEGORIES.map(c => <option key={c} value={c} style={{ background:"#302b63" }}>{c}</option>)}
+                  {activeCategories.map(c => <option key={c} value={c} style={{ background:"#302b63" }}>{c}</option>)}
                 </select>
               </div>
 
@@ -633,38 +704,113 @@ export default function Dashboard() {
         {/* ---- HISTORY TAB ---- */}
         {activeTab === "history" && (
           <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px" }}>
-              <p style={{ color:"rgba(255,255,255,0.4)", fontSize:"13px", fontWeight:"500" }}>{transactions.length} total transactions</p>
-              <button className="danger-btn" onClick={deleteAll}><Trash2 size={13} /> Clear all</button>
+
+            {/* Toolbar */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
+              <p style={{ color:"rgba(255,255,255,0.4)", fontSize:"13px", fontWeight:"500" }}>
+                {selectMode && selectedIds.size > 0 ? `${selectedIds.size} selected` : `${transactions.length} transactions`}
+              </p>
+              <div style={{ display:"flex", gap:"8px" }}>
+                {selectMode ? (
+                  <>
+                    <button className="ghost-btn" onClick={toggleSelectAll}>
+                      {selectedIds.size === transactions.length ? "Deselect all" : "Select all"}
+                    </button>
+                    {selectedIds.size > 0 && (
+                      <button className="danger-btn" onClick={deleteSelected}>
+                        <Trash2 size={13} /> Delete ({selectedIds.size})
+                      </button>
+                    )}
+                    <button className="ghost-btn" onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="ghost-btn" onClick={() => setSelectMode(true)}>
+                      Select
+                    </button>
+                    <button className="danger-btn" onClick={deleteAll}>
+                      <Trash2 size={13} /> Clear all
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
-            <div style={{ ...glassCard, padding:"24px" }}>
-              <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+            {/* Hint text when in select mode */}
+            {selectMode && (
+              <p style={{ color:"rgba(167,139,250,0.6)", fontSize:"12px", marginBottom:"12px", fontWeight:"500" }}>
+                Tap any transaction to select it
+              </p>
+            )}
+
+            <div style={{ ...glassCard, padding:"16px" }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
                 <AnimatePresence>
-                  {transactions.map(t => (
-                    <motion.div key={t.id} layout initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, x:-20 }} className="tx-row">
-                      <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-                        <div style={{ width:38, height:38, borderRadius:"10px", background: t.type === "income" ? "rgba(52,211,153,0.1)" : "rgba(248,113,113,0.1)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                          {t.type === "income" ? <TrendingUp size={15} color="#34d399" /> : <TrendingDown size={15} color="#f87171" />}
+                  {transactions.map(t => {
+                    const isSelected = selectedIds.has(t.id);
+                    return (
+                      <motion.div
+                        key={t.id} layout
+                        initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, x:-20 }}
+                        onClick={() => selectMode && toggleSelect(t.id)}
+                        {...useLongPress(() => { setSelectMode(true); toggleSelect(t.id); })}
+                        className="tx-row"
+                        style={{
+                          cursor: selectMode ? "pointer" : "default",
+                          background: isSelected ? "rgba(167,139,250,0.12)" : "rgba(255,255,255,0.04)",
+                          border: isSelected ? "1px solid rgba(167,139,250,0.35)" : "1px solid rgba(255,255,255,0.06)",
+                          borderRadius:"14px",
+                          padding:"14px 16px",
+                          transition:"all 0.15s ease",
+                          userSelect:"none",
+                        }}
+                      >
+                        <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+                          {/* Checkbox or icon */}
+                          {selectMode ? (
+                            <div style={{
+                              width:22, height:22, borderRadius:"6px", flexShrink:0,
+                              background: isSelected ? "rgba(167,139,250,0.9)" : "rgba(255,255,255,0.08)",
+                              border: isSelected ? "2px solid #a78bfa" : "2px solid rgba(255,255,255,0.15)",
+                              display:"flex", alignItems:"center", justifyContent:"center",
+                              transition:"all 0.15s ease",
+                            }}>
+                              {isSelected && (
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                  <polyline points="2 6 5 9 10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ width:38, height:38, borderRadius:"10px", background: t.type === "income" ? "rgba(52,211,153,0.1)" : "rgba(248,113,113,0.1)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                              {t.type === "income" ? <TrendingUp size={15} color="#34d399" /> : <TrendingDown size={15} color="#f87171" />}
+                            </div>
+                          )}
+                          <div>
+                            <p style={{ fontSize:"14px", fontWeight:"600", color:"rgba(255,255,255,0.85)", margin:0 }}>
+                              {t.category || "Other"}
+                              {t.desc && <span style={{ color:"rgba(255,255,255,0.3)", fontWeight:400, marginLeft:"6px" }}>— {t.desc}</span>}
+                            </p>
+                            <p style={{ fontSize:"11px", color:"rgba(255,255,255,0.25)", margin:0, marginTop:"2px" }}>
+                              {formatTxDate(t)}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p style={{ fontSize:"14px", fontWeight:"600", color:"rgba(255,255,255,0.85)", margin:0 }}>
-                            {t.category || "Other"}
-                            {t.desc && <span style={{ color:"rgba(255,255,255,0.3)", fontWeight:400, marginLeft:"6px" }}>— {t.desc}</span>}
+                        <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+                          <p style={{ fontSize:"15px", fontWeight:"700", color: t.type === "income" ? "#34d399" : "#f87171", margin:0, whiteSpace:"nowrap" }}>
+                            {t.type === "income" ? "+" : "−"} Rs. {t.amount.toLocaleString("en-IN")}
                           </p>
-                          <p style={{ fontSize:"11px", color:"rgba(255,255,255,0.25)", margin:0, marginTop:"2px" }}>
-                            {formatTxDate(t)}
-                          </p>
+                          {!selectMode && (
+                            <button className="del-btn" onClick={(e) => { e.stopPropagation(); deleteOne(t.id); }}>
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:"16px" }}>
-                        <p style={{ fontSize:"15px", fontWeight:"700", color: t.type === "income" ? "#34d399" : "#f87171", margin:0, whiteSpace:"nowrap" }}>
-                          {t.type === "income" ? "+" : "−"} Rs. {t.amount.toLocaleString("en-IN")}
-                        </p>
-                        <button className="del-btn" onClick={() => deleteOne(t.id)}><Trash2 size={14} /></button>
-                      </div>
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
                 </AnimatePresence>
                 {transactions.length === 0 && (
                   <div style={{ padding:"48px", textAlign:"center", color:"rgba(255,255,255,0.2)", fontSize:"14px" }}>
@@ -673,6 +819,49 @@ export default function Dashboard() {
                 )}
               </div>
             </div>
+
+            {/* Floating delete bar when items selected */}
+            <AnimatePresence>
+              {selectMode && selectedIds.size > 0 && (
+                <motion.div
+                  initial={{ opacity:0, y:40 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:40 }}
+                  style={{
+                    position:"fixed", bottom:"32px", left:"50%", transform:"translateX(-50%)",
+                    background:"rgba(15,12,41,0.95)", backdropFilter:"blur(20px)",
+                    border:"1px solid rgba(248,113,113,0.3)", borderRadius:"50px",
+                    padding:"12px 24px", display:"flex", alignItems:"center", gap:"16px",
+                    boxShadow:"0 8px 32px rgba(0,0,0,0.5)", zIndex:100,
+                    whiteSpace:"nowrap",
+                  }}
+                >
+                  <p style={{ color:"rgba(255,255,255,0.7)", fontSize:"14px", fontWeight:"500", margin:0 }}>
+                    {selectedIds.size} selected
+                  </p>
+                  <button
+                    onClick={deleteSelected}
+                    style={{
+                      background:"rgba(248,113,113,0.15)", border:"1px solid rgba(248,113,113,0.3)",
+                      borderRadius:"50px", padding:"8px 20px", color:"#f87171",
+                      fontFamily:"'Outfit',sans-serif", fontSize:"14px", fontWeight:"600",
+                      cursor:"pointer", display:"flex", alignItems:"center", gap:"6px",
+                      transition:"all 0.2s",
+                    }}
+                  >
+                    <Trash2 size={14} /> Delete selected
+                  </button>
+                  <button
+                    onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                    style={{
+                      background:"none", border:"none", color:"rgba(255,255,255,0.3)",
+                      fontFamily:"'Outfit',sans-serif", fontSize:"14px", cursor:"pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
           </motion.div>
         )}
       </main>
