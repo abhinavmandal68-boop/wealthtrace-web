@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { db, auth } from "../firebase";
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, writeBatch } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { Trash2, LogOut, Upload, TrendingUp, TrendingDown, Activity, Plus } from "lucide-react";
+import { Trash2, LogOut, Upload, TrendingUp, TrendingDown, Plus, ChevronLeft, ChevronRight, X, Check } from "lucide-react";
 
 const COLORS = ["#a78bfa", "#60a5fa", "#f472b6", "#34d399", "#fb923c", "#e879f9"];
 
@@ -19,8 +19,8 @@ const glassCard = {
 
 const EXPENSE_CATEGORIES = ["Rent", "Food", "Utilities", "Entertainment", "Transport", "Shopping", "Health", "Other"];
 const INCOME_CATEGORIES  = ["Salary", "Freelance", "Business", "Investment", "Bonus", "Gift", "Refund", "Other"];
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-// Long press hook for mobile
 function useLongPress(callback, ms = 500) {
   const timerRef = { current: null };
   const start = () => { timerRef.current = setTimeout(callback, ms); };
@@ -28,24 +28,359 @@ function useLongPress(callback, ms = 500) {
   return { onMouseDown: start, onMouseUp: stop, onMouseLeave: stop, onTouchStart: start, onTouchEnd: stop };
 }
 
+// ── Monthly Income/Expense Modal ──────────────────────────────────────────────
+function MonthlyModal({ onClose, transactions, user, db }) {
+  const now = new Date();
+  const [viewMonth, setViewMonth] = useState(now.getMonth());
+  const [viewYear, setViewYear]   = useState(now.getFullYear());
+  const [addType, setAddType]     = useState("income");
+  const [addAmount, setAddAmount] = useState("");
+  const [addCat, setAddCat]       = useState("Salary");
+  const [addNote, setAddNote]     = useState("");
+  const [addDate, setAddDate]     = useState(now.toISOString().split("T")[0]);
+  const [saving, setSaving]       = useState(false);
+  const [saved, setSaved]         = useState(false);
+  const [filterTab, setFilterTab] = useState("all"); // all | income | expense
+
+  const monthKey = `${viewYear}-${viewMonth}`;
+
+  // All transactions for the selected month
+  const monthTxns = transactions.filter(t => {
+    if (!t.createdAt?.seconds) return false;
+    const d = new Date(t.createdAt.seconds * 1000);
+    return d.getMonth() === viewMonth && d.getFullYear() === viewYear;
+  });
+
+  const totalIncome  = monthTxns.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
+  const totalExpense = monthTxns.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const net = totalIncome - totalExpense;
+
+  const displayed = filterTab === "all" ? monthTxns
+    : monthTxns.filter(t => t.type === filterTab);
+
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    const nextM = viewMonth === 11 ? 0 : viewMonth + 1;
+    const nextY = viewMonth === 11 ? viewYear + 1 : viewYear;
+    if (nextY > now.getFullYear() || (nextY === now.getFullYear() && nextM > now.getMonth())) return;
+    setViewMonth(nextM); setViewYear(nextY);
+  };
+  const isCurrentMonth = viewMonth === now.getMonth() && viewYear === now.getFullYear();
+
+  const handleSave = async () => {
+    const val = parseFloat(addAmount);
+    if (!val || val <= 0) return;
+    setSaving(true);
+    const chosenDate = new Date(addDate + "T12:00:00");
+    await addDoc(collection(db, "transactions"), {
+      amount: val, type: addType, category: addCat, desc: addNote,
+      userId: user.uid,
+      createdAt: { seconds: Math.floor(chosenDate.getTime() / 1000), nanoseconds: 0 },
+      bankDate: addDate,
+    });
+    setAddAmount(""); setAddNote("");
+    setSaving(false); setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  };
+
+  const deleteOne = async (id) => await deleteDoc(doc(db, "transactions", id));
+
+  const fmt = (n) => `Rs. ${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 200,
+        background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "16px",
+      }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 24 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 24 }}
+        transition={{ type: "spring", stiffness: 300, damping: 28 }}
+        style={{
+          width: "100%", maxWidth: "820px", maxHeight: "92vh",
+          overflowY: "auto",
+          background: "rgba(15,12,41,0.97)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: "28px",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.6)",
+          fontFamily: "'Outfit', sans-serif",
+          color: "white",
+        }}
+      >
+        {/* ── Header ── */}
+        <div style={{ padding: "28px 28px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h2 style={{ fontSize: "20px", fontWeight: "800", margin: "0 0 4px", letterSpacing: "-0.01em" }}>Monthly Tracker</h2>
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.35)", margin: 0, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase" }}>Income & Expenses</p>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", color: "rgba(255,255,255,0.5)", cursor: "pointer", padding: "8px", display: "flex" }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* ── Month Navigator ── */}
+        <div style={{ padding: "20px 28px 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <button onClick={prevMonth} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", color: "rgba(255,255,255,0.6)", cursor: "pointer", padding: "8px 12px", display: "flex", alignItems: "center", gap: 4 }}>
+            <ChevronLeft size={16} /> Prev
+          </button>
+
+          <div style={{ textAlign: "center" }}>
+            <p style={{ fontSize: "22px", fontWeight: "800", margin: 0, letterSpacing: "-0.02em" }}>
+              {MONTHS[viewMonth]} {viewYear}
+            </p>
+            {isCurrentMonth && (
+              <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(167,139,250,0.8)", background: "rgba(167,139,250,0.12)", borderRadius: "50px", padding: "2px 10px" }}>
+                Current month
+              </span>
+            )}
+          </div>
+
+          <button onClick={nextMonth} disabled={isCurrentMonth} style={{ background: isCurrentMonth ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", color: isCurrentMonth ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.6)", cursor: isCurrentMonth ? "default" : "pointer", padding: "8px 12px", display: "flex", alignItems: "center", gap: 4 }}>
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* ── Month Pill Selector ── */}
+        <div style={{ padding: "16px 28px 0", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          {MONTHS.map((m, i) => {
+            const isDisabled = viewYear === now.getFullYear() && i > now.getMonth();
+            const isActive = i === viewMonth;
+            return (
+              <button key={m} disabled={isDisabled}
+                onClick={() => setViewMonth(i)}
+                style={{
+                  padding: "5px 13px", borderRadius: "50px", border: "1px solid",
+                  fontSize: "12px", fontWeight: 600, fontFamily: "'Outfit',sans-serif",
+                  cursor: isDisabled ? "default" : "pointer",
+                  background: isActive ? "linear-gradient(135deg,rgba(120,40,200,0.7),rgba(40,120,200,0.7))" : "rgba(255,255,255,0.04)",
+                  borderColor: isActive ? "rgba(167,139,250,0.4)" : "rgba(255,255,255,0.08)",
+                  color: isActive ? "white" : isDisabled ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.45)",
+                  transition: "all 0.2s",
+                }}
+              >
+                {m.slice(0,3)}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "20px 28px" }}>
+
+          {/* ── Left: Summary + Transactions ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+
+            {/* Metric cards */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+              {[
+                { label: "Income", value: fmt(totalIncome), color: "#34d399", bg: "rgba(52,211,153,0.08)", border: "rgba(52,211,153,0.15)" },
+                { label: "Expenses", value: fmt(totalExpense), color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.15)" },
+                { label: "Net", value: (net < 0 ? "−" : "") + fmt(Math.abs(net)), color: net >= 0 ? "#34d399" : "#f87171", bg: net >= 0 ? "rgba(52,211,153,0.06)" : "rgba(248,113,113,0.06)", border: net >= 0 ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)" },
+              ].map(({ label, value, color, bg, border }) => (
+                <div key={label} style={{ background: bg, border: `1px solid ${border}`, borderRadius: "16px", padding: "14px 12px" }}>
+                  <p style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 6px" }}>{label}</p>
+                  <p style={{ fontSize: "14px", fontWeight: 800, color, margin: 0, letterSpacing: "-0.01em" }}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Mini bar chart */}
+            {monthTxns.length > 0 && (
+              <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "16px", padding: "16px" }}>
+                <p style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", margin: "0 0 12px" }}>Overview</p>
+                <ResponsiveContainer width="100%" height={110}>
+                  <BarChart data={[{ name: MONTHS[viewMonth].slice(0,3), income: totalIncome, expense: totalExpense }]} barGap={6}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11, fontFamily: "Outfit" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 10, fontFamily: "Outfit" }} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} />
+                    <Tooltip
+                      contentStyle={{ background: "rgba(15,12,41,0.95)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", fontFamily: "Outfit", fontSize: "12px" }}
+                      formatter={(val, name) => [`Rs. ${val.toLocaleString("en-IN")}`, name === "income" ? "Income" : "Expense"]}
+                    />
+                    <Bar dataKey="income" fill="rgba(52,211,153,0.75)" radius={[5,5,0,0]} maxBarSize={48} />
+                    <Bar dataKey="expense" fill="rgba(248,113,113,0.75)" radius={[5,5,0,0]} maxBarSize={48} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div style={{ display: "flex", gap: "14px", marginTop: "6px" }}>
+                  <span style={{ fontSize: "11px", color: "rgba(52,211,153,0.7)", display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, background: "rgba(52,211,153,0.75)", borderRadius: 2, display: "inline-block" }}></span>Income</span>
+                  <span style={{ fontSize: "11px", color: "rgba(248,113,113,0.7)", display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, background: "rgba(248,113,113,0.75)", borderRadius: 2, display: "inline-block" }}></span>Expense</span>
+                </div>
+              </div>
+            )}
+
+            {/* Transaction list */}
+            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "16px", overflow: "hidden" }}>
+              {/* Filter tabs */}
+              <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "4px" }}>
+                {[["all","All"],["income","Income"],["expense","Expenses"]].map(([key, label]) => (
+                  <button key={key} onClick={() => setFilterTab(key)}
+                    style={{
+                      flex: 1, padding: "7px", border: "none", borderRadius: "8px",
+                      fontFamily: "'Outfit',sans-serif", fontSize: "12px", fontWeight: 600,
+                      cursor: "pointer", transition: "all 0.2s",
+                      background: filterTab === key ? "rgba(167,139,250,0.15)" : "transparent",
+                      color: filterTab === key ? "rgba(167,139,250,1)" : "rgba(255,255,255,0.35)",
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+
+              <div style={{ maxHeight: "240px", overflowY: "auto", padding: "8px" }}>
+                {displayed.length === 0 ? (
+                  <p style={{ textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: "13px", padding: "24px 0" }}>
+                    No {filterTab === "all" ? "" : filterTab} transactions in {MONTHS[viewMonth]}
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {displayed.map(t => (
+                      <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 10px", background: "rgba(255,255,255,0.03)", borderRadius: "10px", transition: "background 0.15s" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div style={{ width: 30, height: 30, borderRadius: "8px", background: t.type === "income" ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {t.type === "income" ? <TrendingUp size={14} color="#34d399" /> : <TrendingDown size={14} color="#f87171" />}
+                          </div>
+                          <div>
+                            <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.8)", margin: 0 }}>{t.desc || t.category}</p>
+                            <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.3)", margin: "2px 0 0" }}>{t.category}</p>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <p style={{ fontSize: "13px", fontWeight: 700, color: t.type === "income" ? "#34d399" : "#f87171", margin: 0, whiteSpace: "nowrap" }}>
+                            {t.type === "income" ? "+" : "−"} Rs. {t.amount.toLocaleString("en-IN")}
+                          </p>
+                          <button onClick={() => deleteOne(t.id)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.15)", cursor: "pointer", padding: 3, borderRadius: 5, display: "flex", transition: "color 0.2s" }}
+                            onMouseEnter={e => e.currentTarget.style.color = "rgba(248,113,113,0.7)"}
+                            onMouseLeave={e => e.currentTarget.style.color = "rgba(255,255,255,0.15)"}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Right: Add Entry ── */}
+          <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px", padding: "20px", display: "flex", flexDirection: "column", gap: "14px", position: "relative", overflow: "hidden" }}>
+
+            {/* Saved flash */}
+            <AnimatePresence>
+              {saved && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  style={{ position: "absolute", inset: 0, background: "rgba(15,12,41,0.96)", backdropFilter: "blur(16px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10, borderRadius: "20px" }}>
+                  <motion.div initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}
+                    style={{ width: 52, height: 52, background: "rgba(52,211,153,0.15)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                    <Check size={24} color="#34d399" />
+                  </motion.div>
+                  <p style={{ color: "#34d399", fontWeight: 700, fontSize: 15, margin: 0 }}>Saved!</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <p style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+              Add to {MONTHS[viewMonth]}
+            </p>
+
+            {/* Type toggle */}
+            <div style={{ display: "flex", gap: "5px", background: "rgba(255,255,255,0.04)", borderRadius: "10px", padding: "3px" }}>
+              {["income","expense"].map(t => (
+                <button key={t} onClick={() => { setAddType(t); setAddCat(t === "income" ? "Salary" : "Food"); }}
+                  style={{
+                    flex: 1, padding: "9px", border: "1px solid", borderRadius: "8px",
+                    fontFamily: "'Outfit',sans-serif", fontSize: "13px", fontWeight: 600,
+                    cursor: "pointer", transition: "all 0.2s",
+                    background: addType === t ? (t === "income" ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)") : "transparent",
+                    borderColor: addType === t ? (t === "income" ? "rgba(52,211,153,0.25)" : "rgba(248,113,113,0.25)") : "transparent",
+                    color: addType === t ? (t === "income" ? "#34d399" : "#f87171") : "rgba(255,255,255,0.3)",
+                    textTransform: "capitalize",
+                  }}
+                >{t}</button>
+              ))}
+            </div>
+
+            {/* Amount */}
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Amount</label>
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 600 }}>Rs.</span>
+                <input type="number" placeholder="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleSave()}
+                  style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "11px 14px 11px 42px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "17px", fontWeight: 700, outline: "none" }}
+                />
+              </div>
+            </div>
+
+            {/* Category */}
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Category</label>
+              <select value={addCat} onChange={e => setAddCat(e.target.value)}
+                style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 14px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", outline: "none" }}>
+                {(addType === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(c => (
+                  <option key={c} value={c} style={{ background: "#302b63" }}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Note */}
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Note <span style={{ color: "rgba(255,255,255,0.2)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
+              <input type="text" placeholder="e.g. May salary, Rent payment" value={addNote} onChange={e => setAddNote(e.target.value)}
+                style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 14px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", outline: "none" }}
+              />
+            </div>
+
+            {/* Date */}
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Date</label>
+              <input type="date" value={addDate} onChange={e => setAddDate(e.target.value)}
+                max={new Date().toISOString().split("T")[0]}
+                style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 14px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", outline: "none", colorScheme: "dark" }}
+              />
+            </div>
+
+            <button onClick={handleSave} disabled={saving}
+              style={{ width: "100%", padding: "13px", background: "linear-gradient(135deg, rgba(120,40,200,0.9), rgba(40,120,200,0.9))", border: "none", borderRadius: "12px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", fontWeight: 700, letterSpacing: "0.05em", cursor: saving ? "default" : "pointer", boxShadow: "0 6px 24px rgba(120,40,200,0.35)", transition: "all 0.2s", opacity: saving ? 0.6 : 1 }}>
+              {saving ? "Saving..." : `Add ${addType === "income" ? "Income" : "Expense"}`}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [amount, setAmount] = useState("");
-  const [type, setType] = useState("expense");
-  const [category, setCategory] = useState("Food");
+  const [amount, setAmount]         = useState("");
+  const [type, setType]             = useState("expense");
+  const [category, setCategory]     = useState("Food");
   const activeCategories = type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-  const [desc, setDesc] = useState("");
-  const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-  const [txnDate, setTxnDate] = useState(todayStr);
+  const [desc, setDesc]             = useState("");
+  const todayStr = new Date().toISOString().split("T")[0];
+  const [txnDate, setTxnDate]       = useState(todayStr);
   const [transactions, setTransactions] = useState([]);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [filterMonth, setFilterMonth] = useState("All");
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [selectMode, setSelectMode] = useState(false);
+  const [showSuccess, setShowSuccess]   = useState(false);
+  const [activeTab, setActiveTab]       = useState("dashboard");
+  const [filterMonth, setFilterMonth]   = useState("All");
+  const [selectedIds, setSelectedIds]   = useState(new Set());
+  const [selectMode, setSelectMode]     = useState(false);
+  const [showMonthly, setShowMonthly]   = useState(false);   // ← Monthly modal toggle
 
   const user = auth.currentUser;
 
-  // Real-time fetch
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "transactions"), where("userId", "==", user.uid));
@@ -56,11 +391,10 @@ export default function Dashboard() {
     return () => unsub();
   }, [user]);
 
-  // Add transaction
   const addTransaction = async () => {
     const val = Number(amount);
     if (!val || isNaN(val) || val <= 0) return;
-    const chosenDate = new Date(txnDate + "T12:00:00"); // noon to avoid timezone issues
+    const chosenDate = new Date(txnDate + "T12:00:00");
     await addDoc(collection(db, "transactions"), {
       amount: val, type, category, desc,
       userId: user.uid,
@@ -72,46 +406,24 @@ export default function Dashboard() {
     setTimeout(() => { setShowSuccess(false); setActiveTab("dashboard"); }, 2000);
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // MULTI-BANK CSV PARSER
-  // Supports: SBI, HDFC, ICICI, Federal Bank, IndusInd Bank
-  // ─────────────────────────────────────────────────────────────
-
-  // Universal date parser — handles all date formats used by Indian banks
+  // ── CSV Parser (unchanged) ──
   const parseDate = (raw) => {
     if (!raw) return null;
     const s = raw.trim().replace(/"/g, "");
-
-    // DD/MM/YYYY or DD-MM-YYYY  →  SBI, Federal, IndusInd
     const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
     if (dmy) return new Date(+dmy[3], +dmy[2] - 1, +dmy[1]);
-
-    // DD/MM/YY  →  some ICICI exports
     const dmyShort = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/);
     if (dmyShort) return new Date(2000 + +dmyShort[3], +dmyShort[2] - 1, +dmyShort[1]);
-
-    // DD-MMM-YYYY  →  HDFC  (e.g. 14-Mar-2026)
     const hdfcFmt = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
     if (hdfcFmt) return new Date(`${hdfcFmt[2]} ${hdfcFmt[1]} ${hdfcFmt[3]}`);
-
-    // DD MMM YYYY  →  SBI, IndusInd  (e.g. 14 Mar 2026)
     const spaced = s.match(/^(\d{1,2})\s([A-Za-z]{3})\s(\d{4})$/);
     if (spaced) return new Date(`${spaced[2]} ${spaced[1]} ${spaced[3]}`);
-
-    // YYYY-MM-DD  →  ISO, some ICICI/Federal net-banking exports
     const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3]);
-
-    // MM/DD/YYYY  →  rare ICICI credit-card exports
-    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (mdy && +mdy[2] > 12) return new Date(+mdy[3], +mdy[1] - 1, +mdy[2]);
-
-    // Fallback: native Date parse
     const fb = new Date(s);
     return isNaN(fb.getTime()) ? null : fb;
   };
 
-  // Detect which bank the CSV is from based on header keywords
   const detectBank = (headerLine = "") => {
     const h = headerLine.toLowerCase();
     if (h.includes("cheque no") || h.includes("ref no./cheque")) return "SBI";
@@ -122,160 +434,96 @@ export default function Dashboard() {
     return "Unknown Bank";
   };
 
-  // Auto-detect expense category from transaction description
   const detectCategory = (desc = "") => {
     const d = desc.toLowerCase();
-    if (d.includes("zomato") || d.includes("swiggy") || d.includes("dunzo") || d.includes("restaurant") || d.includes("cafe") || d.includes("hotel food") || d.includes("food")) return "Food";
-    if (d.includes("uber") || d.includes("ola") || d.includes("rapido") || d.includes("petrol") || d.includes("fuel") || d.includes("irctc") || d.includes("railway") || d.includes("flight") || d.includes("indigo") || d.includes("spicejet") || d.includes("makemytrip") || d.includes("goibibo")) return "Transport";
-    if (d.includes("amazon") || d.includes("flipkart") || d.includes("myntra") || d.includes("meesho") || d.includes("nykaa") || d.includes("ajio") || d.includes("shopping")) return "Shopping";
-    if (d.includes("electricity") || d.includes("bescom") || d.includes("water bill") || d.includes("gas bill") || d.includes("broadband") || d.includes("airtel") || d.includes("jio") || d.includes("bsnl") || d.includes("vodafone") || d.includes("vi-")) return "Utilities";
-    if (d.includes("rent") || d.includes("housing") || d.includes("maintenance") || d.includes("society fee")) return "Rent";
-    if (d.includes("hospital") || d.includes("pharmacy") || d.includes("medical") || d.includes("doctor") || d.includes("apollo") || d.includes("fortis") || d.includes("medplus") || d.includes("netmeds") || d.includes("1mg")) return "Health";
-    if (d.includes("netflix") || d.includes("hotstar") || d.includes("prime video") || d.includes("spotify") || d.includes("youtube premium") || d.includes("bookmyshow") || d.includes("pvr") || d.includes("inox")) return "Entertainment";
+    if (d.includes("zomato") || d.includes("swiggy") || d.includes("restaurant") || d.includes("food")) return "Food";
+    if (d.includes("uber") || d.includes("ola") || d.includes("petrol") || d.includes("fuel") || d.includes("irctc") || d.includes("flight")) return "Transport";
+    if (d.includes("amazon") || d.includes("flipkart") || d.includes("myntra") || d.includes("shopping")) return "Shopping";
+    if (d.includes("electricity") || d.includes("broadband") || d.includes("airtel") || d.includes("jio")) return "Utilities";
+    if (d.includes("rent") || d.includes("housing") || d.includes("maintenance")) return "Rent";
+    if (d.includes("hospital") || d.includes("pharmacy") || d.includes("medical") || d.includes("doctor")) return "Health";
+    if (d.includes("netflix") || d.includes("hotstar") || d.includes("spotify") || d.includes("bookmyshow")) return "Entertainment";
     return "Other";
   };
 
-  // Parse a CSV line correctly handling quoted fields with commas inside
   const parseCSVLine = (line) => {
-    const result = [];
-    let current = "";
-    let inQuotes = false;
+    const result = []; let current = ""; let inQuotes = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (ch === '"') { inQuotes = !inQuotes; continue; }
       if (ch === "," && !inQuotes) { result.push(current.trim()); current = ""; continue; }
       current += ch;
     }
-    result.push(current.trim());
-    return result;
+    result.push(current.trim()); return result;
   };
 
-  const [importStatus, setImportStatus] = useState(null); // null | "loading" | "success" | "error"
-  const [importBank, setImportBank]   = useState("");
-  const [importCount, setImportCount] = useState(0);
+  const [importStatus, setImportStatus] = useState(null);
+  const [importBank, setImportBank]     = useState("");
+  const [importCount, setImportCount]   = useState(0);
   const [importErrors, setImportErrors] = useState([]);
 
   const handleImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    e.target.value = ""; // allow re-import of same file
-    setImportStatus("loading");
-    setImportErrors([]);
-    setImportBank("");
-
+    e.target.value = "";
+    setImportStatus("loading"); setImportErrors([]); setImportBank("");
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
         const text = event.target.result;
         const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-
-        // ── Find header row ───────────────────────────────────────────
         const headerKeywords = ["txn date","transaction date","trans date","posting date","value date","date"];
-        let headerIdx = lines.findIndex(l =>
-          headerKeywords.some(k => l.toLowerCase().includes(k))
-        );
+        let headerIdx = lines.findIndex(l => headerKeywords.some(k => l.toLowerCase().includes(k)));
         if (headerIdx === -1) headerIdx = 0;
-
         const headerRaw = lines[headerIdx];
         const bank = detectBank(headerRaw);
         setImportBank(bank);
-
         const headers = parseCSVLine(headerRaw).map(h => h.toLowerCase());
         const col = (kws) => headers.findIndex(h => kws.some(k => h.includes(k)));
-
-        // ── Column indices ───────────────────────────────────────────
-        const dateCol   = col(["txn date","transaction date","trans date","posting date","date"]);
-        const descCol   = col(["description","narration","particulars","remarks","transaction remarks","details","particulars"]);
-        const debitCol  = col(["debit","withdrawal","withdrawal amt","dr amt","debit amount"]);
-        const creditCol = col(["credit","deposit","deposit amt","cr amt","credit amount"]);
-        // ICICI / IndusInd use a single amount + Dr/Cr flag
+        const dateCol   = col(["txn date","transaction date","date"]);
+        const descCol   = col(["description","narration","particulars","remarks"]);
+        const debitCol  = col(["debit","withdrawal"]);
+        const creditCol = col(["credit","deposit"]);
         const amtCol    = col(["amount"]);
-        const drcrCol   = col(["dr/cr","cr/dr","txn type","transaction type","type"]);
-
-        const skipWords = ["opening balance","closing balance","net total","total","statement","account no","customer name","branch","from date","to date","generated on","available bal"];
-
-        const errors = [];
-        const batch  = writeBatch(db);
-        let count    = 0;
-
+        const drcrCol   = col(["dr/cr","cr/dr","txn type","type"]);
+        const skipWords = ["opening balance","closing balance","total","statement","account no","customer name"];
+        const errors = []; const batch = writeBatch(db); let count = 0;
         lines.slice(headerIdx + 1).forEach((line, idx) => {
           if (!line) return;
           const ll = line.toLowerCase();
-          if (skipWords.some(k => ll.startsWith(k) || ll.includes(`"${k}`))) return;
-
+          if (skipWords.some(k => ll.startsWith(k))) return;
           const cols = parseCSVLine(line);
           if (cols.length < 2) return;
-
-          // ── Date ────────────────────────────────────────────────────
           const rawDate = (dateCol >= 0 ? cols[dateCol] : cols[0]) || "";
-          const txnDate = parseDate(rawDate);
-          if (!txnDate || isNaN(txnDate.getTime())) {
-            if (rawDate.length > 0) errors.push(`Row ${idx + 2} (${bank}): cannot parse date "${rawDate}"`);
+          const txnDateParsed = parseDate(rawDate);
+          if (!txnDateParsed || isNaN(txnDateParsed.getTime())) {
+            if (rawDate.length > 0) errors.push(`Row ${idx + 2}: cannot parse date "${rawDate}"`);
             return;
           }
-
-          // ── Description ─────────────────────────────────────────────
           const rawDesc = (descCol >= 0 ? cols[descCol] : (cols[1] || cols[2] || "")).slice(0, 100);
-
-          // ── Amount & type ───────────────────────────────────────────
           const clean = (v) => parseFloat((v || "").replace(/[,\s₹]/g, ""));
-
           let finalAmount = 0, transType = "";
-
           if (amtCol >= 0 && drcrCol >= 0) {
-            // ICICI / IndusInd: single amount column + Dr/Cr indicator
-            const amt  = clean(cols[amtCol]);
-            const flag = (cols[drcrCol] || "").toLowerCase();
-            if (!isNaN(amt) && amt > 0) {
-              finalAmount = amt;
-              transType = (flag.includes("cr") || flag === "c" || flag === "credit") ? "income" : "expense";
-            }
+            const amt = clean(cols[amtCol]); const flag = (cols[drcrCol] || "").toLowerCase();
+            if (!isNaN(amt) && amt > 0) { finalAmount = amt; transType = (flag.includes("cr") || flag === "c" || flag === "credit") ? "income" : "expense"; }
           } else {
-            // SBI / HDFC / Federal: separate debit + credit columns
-            const debit  = clean(debitCol  >= 0 ? cols[debitCol]  : cols[4]);
+            const debit = clean(debitCol >= 0 ? cols[debitCol] : cols[4]);
             const credit = clean(creditCol >= 0 ? cols[creditCol] : cols[5]);
-            if (!isNaN(credit) && credit > 0)     { finalAmount = credit; transType = "income"; }
-            else if (!isNaN(debit) && debit > 0)  { finalAmount = debit;  transType = "expense"; }
+            if (!isNaN(credit) && credit > 0) { finalAmount = credit; transType = "income"; }
+            else if (!isNaN(debit) && debit > 0) { finalAmount = debit; transType = "expense"; }
           }
-
           if (finalAmount <= 0) return;
-
-          const category = detectCategory(rawDesc);
           const ref = doc(collection(db, "transactions"));
-          batch.set(ref, {
-            amount:    finalAmount,
-            type:      transType,
-            category,
-            desc:      rawDesc,
-            userId:    user.uid,
-            createdAt: { seconds: Math.floor(txnDate.getTime() / 1000), nanoseconds: 0 },
-            bankDate:  rawDate,
-            bank,
-            imported:  true,
-          });
+          batch.set(ref, { amount: finalAmount, type: transType, category: detectCategory(rawDesc), desc: rawDesc, userId: user.uid, createdAt: { seconds: Math.floor(txnDateParsed.getTime() / 1000), nanoseconds: 0 }, bankDate: rawDate, bank, imported: true });
           count++;
         });
-
-        if (count > 0) {
-          await batch.commit();
-          setImportCount(count);
-          setImportStatus("success");
-          setImportErrors(errors);
-        } else {
-          setImportStatus("error");
-          setImportErrors(errors.length > 0 ? errors : ["No valid transactions found. Please check the CSV format or try a different export."]);
-        }
-      } catch (err) {
-        console.error(err);
-        setImportStatus("error");
-        setImportErrors([`Unexpected error: ${err.message}`]);
-      }
+        if (count > 0) { await batch.commit(); setImportCount(count); setImportStatus("success"); setImportErrors(errors); }
+        else { setImportStatus("error"); setImportErrors(errors.length > 0 ? errors : ["No valid transactions found."]); }
+      } catch (err) { setImportStatus("error"); setImportErrors([`Error: ${err.message}`]); }
     };
     reader.readAsText(file);
   };
 
-
-  // Delete
   const deleteOne = async (id) => await deleteDoc(doc(db, "transactions", id));
   const deleteAll = async () => {
     if (!window.confirm("Clear all transactions? This cannot be undone.")) return;
@@ -284,42 +532,27 @@ export default function Dashboard() {
     await batch.commit();
   };
 
-  // Toggle single selection
   const toggleSelect = (id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setSelectedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
-
-  // Toggle select all
   const toggleSelectAll = () => {
-    if (selectedIds.size === transactions.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(transactions.map(t => t.id)));
-    }
+    if (selectedIds.size === transactions.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(transactions.map(t => t.id)));
   };
-
-  // Delete selected
   const deleteSelected = async () => {
     if (selectedIds.size === 0) return;
     const batch = writeBatch(db);
     selectedIds.forEach(id => batch.delete(doc(db, "transactions", id)));
     await batch.commit();
-    setSelectedIds(new Set());
-    setSelectMode(false);
+    setSelectedIds(new Set()); setSelectMode(false);
   };
 
-  // Computed
-  const months = ["All", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const months = ["All","January","February","March","April","May","June","July","August","September","October","November","December"];
   const filtered = filterMonth === "All" ? transactions : transactions.filter(t => {
     if (!t.createdAt?.seconds) return false;
     return new Date(t.createdAt.seconds * 1000).toLocaleString("default", { month: "long" }) === filterMonth;
   });
-
-  const totalIncome = filtered.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const totalIncome  = filtered.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const totalExpense = filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const balance = totalIncome - totalExpense;
 
@@ -336,28 +569,26 @@ export default function Dashboard() {
     value: filtered.filter(t => t.category === cat && t.type === "expense").reduce((s, t) => s + t.amount, 0),
   })).filter(d => d.value > 0);
 
-  // Format transaction date — prefer bankDate for imported, else use createdAt
   const formatTxDate = (t) => {
-    if (t.bankDate) {
-      const parsed = parseDate(t.bankDate);
-      if (parsed && !isNaN(parsed.getTime()))
-        return parsed.toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
-    }
-    if (t.createdAt?.seconds)
-      return new Date(t.createdAt.seconds * 1000).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
+    if (t.bankDate) { const p = parseDate(t.bankDate); if (p && !isNaN(p.getTime())) return p.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); }
+    if (t.createdAt?.seconds) return new Date(t.createdAt.seconds * 1000).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     return "Syncing...";
   };
 
   const fmt = (n) => `Rs. ${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
+  // ── Current month summary for Dashboard tab quick card ──
+  const now = new Date();
+  const currentMonthTxns = transactions.filter(t => {
+    if (!t.createdAt?.seconds) return false;
+    const d = new Date(t.createdAt.seconds * 1000);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const currentMonthIncome  = currentMonthTxns.filter(t => t.type === "income").reduce((s,t)=>s+t.amount,0);
+  const currentMonthExpense = currentMonthTxns.filter(t => t.type === "expense").reduce((s,t)=>s+t.amount,0);
+
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)",
-      fontFamily: "'Outfit', sans-serif",
-      color: "white",
-      position: "relative",
-    }}>
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)", fontFamily: "'Outfit', sans-serif", color: "white", position: "relative" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
         * { box-sizing: border-box; }
@@ -371,7 +602,6 @@ export default function Dashboard() {
         .tab-btn:hover:not(.active) { color: rgba(255,255,255,0.75); background: rgba(255,255,255,0.06); }
         .action-btn { width:100%; padding: 15px; background: linear-gradient(135deg, rgba(120,40,200,0.9), rgba(40,120,200,0.9)); border: none; border-radius: 14px; color: white; font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 700; letter-spacing: 0.05em; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 6px 24px rgba(120,40,200,0.4); }
         .action-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(120,40,200,0.5); }
-        .action-btn:active { transform: translateY(0); }
         .ghost-btn { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.5); border-radius: 10px; padding: 8px 14px; font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; display:flex; align-items:center; gap:6px; }
         .ghost-btn:hover { background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2); }
         .danger-btn { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: rgba(239,68,68,0.7); border-radius: 10px; padding: 8px 14px; font-family:'Outfit',sans-serif; font-size:13px; font-weight:500; cursor:pointer; transition:all 0.2s; display:flex; align-items:center; gap:6px; }
@@ -380,21 +610,15 @@ export default function Dashboard() {
         .field-input { width:100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 16px; color: white; font-family:'Outfit',sans-serif; font-size:15px; font-weight:500; outline:none; transition: border-color 0.2s; }
         .field-input:focus { border-color: rgba(167,139,250,0.5); background: rgba(255,255,255,0.07); }
         .field-input::placeholder { color: rgba(255,255,255,0.2); }
-        input[type="date"]::-webkit-calendar-picker-indicator {
-          filter: invert(0.6);
-          cursor: pointer;
-          border-radius: 4px;
-          padding: 2px;
-        }
-        input[type="date"]::-webkit-calendar-picker-indicator:hover {
-          filter: invert(0.9);
-        }
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover { filter: invert(0.9); }
         .toggle-opt { flex:1; padding: 10px; border: none; border-radius: 10px; font-family:'Outfit',sans-serif; font-size:13px; font-weight:600; cursor:pointer; transition:all 0.2s; letter-spacing:0.04em; }
         .tx-row { display:flex; justify-content:space-between; align-items:center; padding: 14px 18px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; transition: all 0.2s; }
         .tx-row:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12); }
         .del-btn { background:none; border:none; color:rgba(255,255,255,0.15); cursor:pointer; padding:4px; border-radius:6px; transition:color 0.2s; display:flex; align-items:center; }
         .del-btn:hover { color: rgba(239,68,68,0.7); }
         .metric-card { padding: 24px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.08); }
+        .monthly-cta:hover { transform: translateY(-2px); box-shadow: 0 12px 36px rgba(120,40,200,0.4) !important; }
       `}</style>
 
       {/* Orbs */}
@@ -411,7 +635,6 @@ export default function Dashboard() {
             {user?.displayName || "Dashboard"}
           </p>
         </motion.div>
-
         <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
           <button className="ghost-btn" onClick={() => signOut(auth)}>
             <LogOut size={14} /> Sign out
@@ -432,20 +655,55 @@ export default function Dashboard() {
 
       <main style={{ maxWidth:"1200px", margin:"0 auto", padding:"0 32px 48px" }}>
 
-        {/* ---- DASHBOARD TAB ---- */}
+        {/* ── DASHBOARD TAB ── */}
         {activeTab === "dashboard" && (
           <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }}>
+
+            {/* ── Monthly Income & Expenses CTA card ── */}
+            <motion.div
+              whileHover={{ y: -2 }}
+              onClick={() => setShowMonthly(true)}
+              className="monthly-cta"
+              style={{
+                cursor: "pointer",
+                background: "linear-gradient(135deg, rgba(120,40,200,0.25) 0%, rgba(40,120,200,0.2) 100%)",
+                border: "1px solid rgba(167,139,250,0.25)",
+                borderRadius: "20px",
+                padding: "20px 24px",
+                marginBottom: "24px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+                boxShadow: "0 4px 24px rgba(120,40,200,0.2)",
+                transition: "all 0.25s ease",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                <div style={{ width: 46, height: 46, borderRadius: "14px", background: "rgba(167,139,250,0.15)", border: "1px solid rgba(167,139,250,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                </div>
+                <div>
+                  <p style={{ fontSize: "15px", fontWeight: 700, color: "rgba(255,255,255,0.9)", margin: "0 0 2px" }}>Monthly Income & Expenses</p>
+                  <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                    {MONTHS[now.getMonth()]} — Income: <span style={{ color: "#34d399", fontWeight: 600 }}>{fmt(currentMonthIncome)}</span> · Expenses: <span style={{ color: "#f87171", fontWeight: 600 }}>{fmt(currentMonthExpense)}</span>
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, color: "rgba(167,139,250,0.8)", fontSize: "13px", fontWeight: 600, flexShrink: 0 }}>
+                View & Add <ChevronRight size={16} />
+              </div>
+            </motion.div>
 
             {/* Month filter */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"24px" }}>
               <p style={{ color:"rgba(255,255,255,0.4)", fontSize:"13px", fontWeight:"500" }}>
                 {filtered.length} transaction{filtered.length !== 1 ? "s" : ""} {filterMonth !== "All" ? `in ${filterMonth}` : "total"}
               </p>
-              <select
-                value={filterMonth}
-                onChange={e => setFilterMonth(e.target.value)}
-                style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"10px", color:"white", padding:"8px 14px", fontSize:"13px", fontWeight:"500", outline:"none", cursor:"pointer", fontFamily:"'Outfit', sans-serif" }}
-              >
+              <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+                style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"10px", color:"white", padding:"8px 14px", fontSize:"13px", fontWeight:"500", outline:"none", cursor:"pointer", fontFamily:"'Outfit', sans-serif" }}>
                 {months.map(m => <option key={m} value={m} style={{ background:"#302b63" }}>{m}</option>)}
               </select>
             </div>
@@ -468,7 +726,6 @@ export default function Dashboard() {
             {/* Charts */}
             {filtered.length > 0 ? (
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"20px", marginBottom:"20px" }}>
-                {/* Bar chart */}
                 <div style={{ ...glassCard, padding:"28px" }}>
                   <p style={{ fontSize:"13px", fontWeight:"700", letterSpacing:"0.06em", textTransform:"uppercase", color:"rgba(255,255,255,0.5)", marginBottom:"20px" }}>Daily Flow</p>
                   <ResponsiveContainer width="100%" height={220}>
@@ -476,11 +733,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
                       <XAxis dataKey="date" tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11, fontFamily:"Outfit" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fill:"rgba(255,255,255,0.3)", fontSize:11, fontFamily:"Outfit" }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                      <Tooltip
-                        contentStyle={{ background:"rgba(15,12,41,0.95)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"12px", fontFamily:"Outfit", fontSize:"13px" }}
-                        labelStyle={{ color:"rgba(255,255,255,0.6)", marginBottom:"4px" }}
-                        formatter={(val, name) => [`Rs. ${val.toLocaleString("en-IN")}`, name === "income" ? "Income" : "Expense"]}
-                      />
+                      <Tooltip contentStyle={{ background:"rgba(15,12,41,0.95)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"12px", fontFamily:"Outfit", fontSize:"13px" }} labelStyle={{ color:"rgba(255,255,255,0.6)", marginBottom:"4px" }} formatter={(val, name) => [`Rs. ${val.toLocaleString("en-IN")}`, name === "income" ? "Income" : "Expense"]} />
                       <Bar dataKey="income" fill="rgba(52,211,153,0.7)" radius={[6,6,0,0]} maxBarSize={32} />
                       <Bar dataKey="expense" fill="rgba(167,139,250,0.7)" radius={[6,6,0,0]} maxBarSize={32} />
                     </BarChart>
@@ -490,8 +743,6 @@ export default function Dashboard() {
                     <span style={{ fontSize:"12px", color:"rgba(167,139,250,0.8)", display:"flex", alignItems:"center", gap:"6px" }}><span style={{ width:8, height:8, background:"rgba(167,139,250,0.7)", borderRadius:"2px", display:"inline-block" }}></span>Expense</span>
                   </div>
                 </div>
-
-                {/* Pie chart */}
                 <div style={{ ...glassCard, padding:"28px" }}>
                   <p style={{ fontSize:"13px", fontWeight:"700", letterSpacing:"0.06em", textTransform:"uppercase", color:"rgba(255,255,255,0.5)", marginBottom:"20px" }}>Spending by Category</p>
                   {pieData.length > 0 ? (
@@ -526,7 +777,7 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Recent transactions preview */}
+            {/* Recent */}
             {filtered.length > 0 && (
               <div style={{ ...glassCard, padding:"28px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
@@ -556,26 +807,17 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* ---- ADD TRANSACTION TAB ---- */}
+        {/* ── ADD TRANSACTION TAB ── */}
         {activeTab === "add" && (
-          <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }}
-            style={{ maxWidth:"520px", margin:"0 auto" }}
-          >
+          <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }} style={{ maxWidth:"520px", margin:"0 auto" }}>
             <div style={{ ...glassCard, padding:"36px", position:"relative", overflow:"hidden" }}>
-
-              {/* Success overlay */}
               <AnimatePresence>
                 {showSuccess && (
-                  <motion.div
-                    initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
-                    style={{ position:"absolute", inset:0, background:"rgba(15,12,41,0.95)", backdropFilter:"blur(20px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:20, borderRadius:"24px" }}
-                  >
+                  <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+                    style={{ position:"absolute", inset:0, background:"rgba(15,12,41,0.95)", backdropFilter:"blur(20px)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:20, borderRadius:"24px" }}>
                     <motion.div initial={{ scale:0.5 }} animate={{ scale:1 }} transition={{ type:"spring", stiffness:300 }}
-                      style={{ width:64, height:64, background:"rgba(52,211,153,0.15)", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", marginBottom:"16px" }}
-                    >
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
+                      style={{ width:64, height:64, background:"rgba(52,211,153,0.15)", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", marginBottom:"16px" }}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                     </motion.div>
                     <p style={{ fontSize:"18px", fontWeight:"700", color:"#34d399", margin:0 }}>Saved Successfully</p>
                     <p style={{ fontSize:"13px", color:"rgba(255,255,255,0.4)", marginTop:"6px" }}>Redirecting to dashboard...</p>
@@ -585,7 +827,6 @@ export default function Dashboard() {
 
               <h2 style={{ fontSize:"20px", fontWeight:"800", letterSpacing:"-0.01em", marginBottom:"28px", color:"rgba(255,255,255,0.9)" }}>New Transaction</h2>
 
-              {/* Type toggle */}
               <div style={{ marginBottom:"20px" }}>
                 <label className="field-label">Type</label>
                 <div style={{ display:"flex", gap:"6px", background:"rgba(255,255,255,0.04)", borderRadius:"12px", padding:"4px" }}>
@@ -600,17 +841,9 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Date */}
               <div style={{ marginBottom:"20px" }}>
                 <label className="field-label">Transaction Date</label>
-                <input
-                  className="field-input"
-                  type="date"
-                  value={txnDate}
-                  max={todayStr}
-                  onChange={e => setTxnDate(e.target.value)}
-                  style={{ colorScheme:"dark", cursor:"pointer" }}
-                />
+                <input className="field-input" type="date" value={txnDate} max={todayStr} onChange={e => setTxnDate(e.target.value)} style={{ colorScheme:"dark", cursor:"pointer" }} />
                 {txnDate !== todayStr && (
                   <p style={{ fontSize:"11px", color:"rgba(167,139,250,0.7)", marginTop:"6px", fontWeight:"500" }}>
                     Recording past transaction for {new Date(txnDate + "T12:00:00").toLocaleDateString("en-IN", { day:"2-digit", month:"long", year:"numeric" })}
@@ -618,19 +851,15 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Amount */}
               <div style={{ marginBottom:"20px" }}>
                 <label className="field-label">Amount</label>
                 <div style={{ position:"relative" }}>
                   <span style={{ position:"absolute", left:"14px", top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.3)", fontSize:"15px", fontWeight:"600" }}>Rs.</span>
                   <input className="field-input" type="number" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)}
-                    style={{ paddingLeft:"44px", fontSize:"20px", fontWeight:"700" }}
-                    onKeyDown={e => e.key === "Enter" && addTransaction()}
-                  />
+                    style={{ paddingLeft:"44px", fontSize:"20px", fontWeight:"700" }} onKeyDown={e => e.key === "Enter" && addTransaction()} />
                 </div>
               </div>
 
-              {/* Category */}
               <div style={{ marginBottom:"20px" }}>
                 <label className="field-label">Category</label>
                 <select className="field-input" value={category} onChange={e => setCategory(e.target.value)}>
@@ -638,7 +867,6 @@ export default function Dashboard() {
                 </select>
               </div>
 
-              {/* Description */}
               <div style={{ marginBottom:"28px" }}>
                 <label className="field-label">Description <span style={{ color:"rgba(255,255,255,0.2)", fontWeight:400, textTransform:"none", letterSpacing:0 }}>(optional)</span></label>
                 <input className="field-input" type="text" placeholder="e.g. Grocery run, Salary credit" value={desc} onChange={e => setDesc(e.target.value)} />
@@ -648,51 +876,31 @@ export default function Dashboard() {
 
               {/* CSV Import */}
               <div style={{ marginTop:"24px", padding:"20px", background:"rgba(255,255,255,0.03)", border:"1px dashed rgba(255,255,255,0.1)", borderRadius:"14px" }}>
-                <p style={{ fontSize:"12px", fontWeight:"600", color:"rgba(255,255,255,0.35)", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:"12px", textAlign:"center" }}>
-                  Import Bank Statement
-                </p>
-
-                {importStatus === "loading" && (
-                  <p style={{ textAlign:"center", color:"rgba(167,139,250,0.8)", fontSize:"13px" }}>Reading file...</p>
-                )}
-
+                <p style={{ fontSize:"12px", fontWeight:"600", color:"rgba(255,255,255,0.35)", letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:"12px", textAlign:"center" }}>Import Bank Statement</p>
+                {importStatus === "loading" && <p style={{ textAlign:"center", color:"rgba(167,139,250,0.8)", fontSize:"13px" }}>Reading file...</p>}
                 {importStatus === "success" && (
                   <div style={{ textAlign:"center" }}>
-                    <p style={{ color:"#34d399", fontSize:"14px", fontWeight:"600", marginBottom:"4px" }}>
-                      {importCount} transactions imported
-                    </p>
+                    <p style={{ color:"#34d399", fontSize:"14px", fontWeight:"600", marginBottom:"4px" }}>{importCount} transactions imported</p>
                     {importBank && <p style={{ color:"rgba(167,139,250,0.7)", fontSize:"12px", marginBottom:"4px" }}>Detected: {importBank}</p>}
-                    {importErrors.length > 0 && (
-                      <p style={{ color:"rgba(251,146,60,0.8)", fontSize:"12px" }}>{importErrors.length} rows skipped</p>
-                    )}
-                    <button className="ghost-btn" style={{ margin:"8px auto 0", display:"inline-flex" }} onClick={() => setImportStatus(null)}>
-                      Import another
-                    </button>
+                    {importErrors.length > 0 && <p style={{ color:"rgba(251,146,60,0.8)", fontSize:"12px" }}>{importErrors.length} rows skipped</p>}
+                    <button className="ghost-btn" style={{ margin:"8px auto 0", display:"inline-flex" }} onClick={() => setImportStatus(null)}>Import another</button>
                   </div>
                 )}
-
                 {importStatus === "error" && (
                   <div style={{ textAlign:"center" }}>
                     <p style={{ color:"#f87171", fontSize:"13px", marginBottom:"8px" }}>Import failed</p>
-                    {importErrors.slice(0,3).map((e, i) => (
-                      <p key={i} style={{ color:"rgba(255,255,255,0.3)", fontSize:"11px" }}>{e}</p>
-                    ))}
-                    <button className="ghost-btn" style={{ margin:"8px auto 0", display:"inline-flex" }} onClick={() => setImportStatus(null)}>
-                      Try again
-                    </button>
+                    {importErrors.slice(0,3).map((e, i) => <p key={i} style={{ color:"rgba(255,255,255,0.3)", fontSize:"11px" }}>{e}</p>)}
+                    <button className="ghost-btn" style={{ margin:"8px auto 0", display:"inline-flex" }} onClick={() => setImportStatus(null)}>Try again</button>
                   </div>
                 )}
-
                 {!importStatus && (
                   <>
                     <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"8px", cursor:"pointer", color:"rgba(167,139,250,0.8)", fontSize:"13px", fontWeight:"600", marginBottom:"10px" }}>
-                      <Upload size={14} />
-                      Choose CSV file
+                      <Upload size={14} /> Choose CSV file
                       <input type="file" accept=".csv" onChange={handleImport} style={{ display:"none" }} />
                     </label>
                     <p style={{ textAlign:"center", color:"rgba(255,255,255,0.2)", fontSize:"11px", lineHeight:"1.6" }}>
-                      Supports SBI, HDFC, ICICI,<br/>Federal Bank, IndusInd Bank<br/>
-                      <span style={{ color:"rgba(255,255,255,0.15)" }}>Download CSV from your bank's NetBanking portal</span>
+                      Supports SBI, HDFC, ICICI,<br/>Federal Bank, IndusInd Bank
                     </p>
                   </>
                 )}
@@ -701,11 +909,9 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* ---- HISTORY TAB ---- */}
+        {/* ── HISTORY TAB ── */}
         {activeTab === "history" && (
           <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }}>
-
-            {/* Toolbar */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px" }}>
               <p style={{ color:"rgba(255,255,255,0.4)", fontSize:"13px", fontWeight:"500" }}>
                 {selectMode && selectedIds.size > 0 ? `${selectedIds.size} selected` : `${transactions.length} transactions`}
@@ -713,37 +919,20 @@ export default function Dashboard() {
               <div style={{ display:"flex", gap:"8px" }}>
                 {selectMode ? (
                   <>
-                    <button className="ghost-btn" onClick={toggleSelectAll}>
-                      {selectedIds.size === transactions.length ? "Deselect all" : "Select all"}
-                    </button>
-                    {selectedIds.size > 0 && (
-                      <button className="danger-btn" onClick={deleteSelected}>
-                        <Trash2 size={13} /> Delete ({selectedIds.size})
-                      </button>
-                    )}
-                    <button className="ghost-btn" onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}>
-                      Cancel
-                    </button>
+                    <button className="ghost-btn" onClick={toggleSelectAll}>{selectedIds.size === transactions.length ? "Deselect all" : "Select all"}</button>
+                    {selectedIds.size > 0 && <button className="danger-btn" onClick={deleteSelected}><Trash2 size={13} /> Delete ({selectedIds.size})</button>}
+                    <button className="ghost-btn" onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}>Cancel</button>
                   </>
                 ) : (
                   <>
-                    <button className="ghost-btn" onClick={() => setSelectMode(true)}>
-                      Select
-                    </button>
-                    <button className="danger-btn" onClick={deleteAll}>
-                      <Trash2 size={13} /> Clear all
-                    </button>
+                    <button className="ghost-btn" onClick={() => setSelectMode(true)}>Select</button>
+                    <button className="danger-btn" onClick={deleteAll}><Trash2 size={13} /> Clear all</button>
                   </>
                 )}
               </div>
             </div>
 
-            {/* Hint text when in select mode */}
-            {selectMode && (
-              <p style={{ color:"rgba(167,139,250,0.6)", fontSize:"12px", marginBottom:"12px", fontWeight:"500" }}>
-                Tap any transaction to select it
-              </p>
-            )}
+            {selectMode && <p style={{ color:"rgba(167,139,250,0.6)", fontSize:"12px", marginBottom:"12px", fontWeight:"500" }}>Tap any transaction to select it</p>}
 
             <div style={{ ...glassCard, padding:"16px" }}>
               <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
@@ -751,37 +940,17 @@ export default function Dashboard() {
                   {transactions.map(t => {
                     const isSelected = selectedIds.has(t.id);
                     return (
-                      <motion.div
-                        key={t.id} layout
+                      <motion.div key={t.id} layout
                         initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, x:-20 }}
                         onClick={() => selectMode && toggleSelect(t.id)}
                         {...useLongPress(() => { setSelectMode(true); toggleSelect(t.id); })}
                         className="tx-row"
-                        style={{
-                          cursor: selectMode ? "pointer" : "default",
-                          background: isSelected ? "rgba(167,139,250,0.12)" : "rgba(255,255,255,0.04)",
-                          border: isSelected ? "1px solid rgba(167,139,250,0.35)" : "1px solid rgba(255,255,255,0.06)",
-                          borderRadius:"14px",
-                          padding:"14px 16px",
-                          transition:"all 0.15s ease",
-                          userSelect:"none",
-                        }}
+                        style={{ cursor: selectMode ? "pointer" : "default", background: isSelected ? "rgba(167,139,250,0.12)" : "rgba(255,255,255,0.04)", border: isSelected ? "1px solid rgba(167,139,250,0.35)" : "1px solid rgba(255,255,255,0.06)", borderRadius:"14px", padding:"14px 16px", transition:"all 0.15s ease", userSelect:"none" }}
                       >
                         <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-                          {/* Checkbox or icon */}
                           {selectMode ? (
-                            <div style={{
-                              width:22, height:22, borderRadius:"6px", flexShrink:0,
-                              background: isSelected ? "rgba(167,139,250,0.9)" : "rgba(255,255,255,0.08)",
-                              border: isSelected ? "2px solid #a78bfa" : "2px solid rgba(255,255,255,0.15)",
-                              display:"flex", alignItems:"center", justifyContent:"center",
-                              transition:"all 0.15s ease",
-                            }}>
-                              {isSelected && (
-                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                                  <polyline points="2 6 5 9 10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                              )}
+                            <div style={{ width:22, height:22, borderRadius:"6px", flexShrink:0, background: isSelected ? "rgba(167,139,250,0.9)" : "rgba(255,255,255,0.08)", border: isSelected ? "2px solid #a78bfa" : "2px solid rgba(255,255,255,0.15)", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s ease" }}>
+                              {isSelected && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><polyline points="2 6 5 9 10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                             </div>
                           ) : (
                             <div style={{ width:38, height:38, borderRadius:"10px", background: t.type === "income" ? "rgba(52,211,153,0.1)" : "rgba(248,113,113,0.1)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
@@ -790,12 +959,9 @@ export default function Dashboard() {
                           )}
                           <div>
                             <p style={{ fontSize:"14px", fontWeight:"600", color:"rgba(255,255,255,0.85)", margin:0 }}>
-                              {t.category || "Other"}
-                              {t.desc && <span style={{ color:"rgba(255,255,255,0.3)", fontWeight:400, marginLeft:"6px" }}>— {t.desc}</span>}
+                              {t.category || "Other"}{t.desc && <span style={{ color:"rgba(255,255,255,0.3)", fontWeight:400, marginLeft:"6px" }}>— {t.desc}</span>}
                             </p>
-                            <p style={{ fontSize:"11px", color:"rgba(255,255,255,0.25)", margin:0, marginTop:"2px" }}>
-                              {formatTxDate(t)}
-                            </p>
+                            <p style={{ fontSize:"11px", color:"rgba(255,255,255,0.25)", margin:0, marginTop:"2px" }}>{formatTxDate(t)}</p>
                           </div>
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
@@ -803,9 +969,7 @@ export default function Dashboard() {
                             {t.type === "income" ? "+" : "−"} Rs. {t.amount.toLocaleString("en-IN")}
                           </p>
                           {!selectMode && (
-                            <button className="del-btn" onClick={(e) => { e.stopPropagation(); deleteOne(t.id); }}>
-                              <Trash2 size={14} />
-                            </button>
+                            <button className="del-btn" onClick={(e) => { e.stopPropagation(); deleteOne(t.id); }}><Trash2 size={14} /></button>
                           )}
                         </div>
                       </motion.div>
@@ -813,58 +977,40 @@ export default function Dashboard() {
                   })}
                 </AnimatePresence>
                 {transactions.length === 0 && (
-                  <div style={{ padding:"48px", textAlign:"center", color:"rgba(255,255,255,0.2)", fontSize:"14px" }}>
-                    No transactions yet.
-                  </div>
+                  <div style={{ padding:"48px", textAlign:"center", color:"rgba(255,255,255,0.2)", fontSize:"14px" }}>No transactions yet.</div>
                 )}
               </div>
             </div>
 
-            {/* Floating delete bar when items selected */}
             <AnimatePresence>
               {selectMode && selectedIds.size > 0 && (
-                <motion.div
-                  initial={{ opacity:0, y:40 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:40 }}
-                  style={{
-                    position:"fixed", bottom:"32px", left:"50%", transform:"translateX(-50%)",
-                    background:"rgba(15,12,41,0.95)", backdropFilter:"blur(20px)",
-                    border:"1px solid rgba(248,113,113,0.3)", borderRadius:"50px",
-                    padding:"12px 24px", display:"flex", alignItems:"center", gap:"16px",
-                    boxShadow:"0 8px 32px rgba(0,0,0,0.5)", zIndex:100,
-                    whiteSpace:"nowrap",
-                  }}
-                >
-                  <p style={{ color:"rgba(255,255,255,0.7)", fontSize:"14px", fontWeight:"500", margin:0 }}>
-                    {selectedIds.size} selected
-                  </p>
-                  <button
-                    onClick={deleteSelected}
-                    style={{
-                      background:"rgba(248,113,113,0.15)", border:"1px solid rgba(248,113,113,0.3)",
-                      borderRadius:"50px", padding:"8px 20px", color:"#f87171",
-                      fontFamily:"'Outfit',sans-serif", fontSize:"14px", fontWeight:"600",
-                      cursor:"pointer", display:"flex", alignItems:"center", gap:"6px",
-                      transition:"all 0.2s",
-                    }}
-                  >
+                <motion.div initial={{ opacity:0, y:40 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:40 }}
+                  style={{ position:"fixed", bottom:"32px", left:"50%", transform:"translateX(-50%)", background:"rgba(15,12,41,0.95)", backdropFilter:"blur(20px)", border:"1px solid rgba(248,113,113,0.3)", borderRadius:"50px", padding:"12px 24px", display:"flex", alignItems:"center", gap:"16px", boxShadow:"0 8px 32px rgba(0,0,0,0.5)", zIndex:100, whiteSpace:"nowrap" }}>
+                  <p style={{ color:"rgba(255,255,255,0.7)", fontSize:"14px", fontWeight:"500", margin:0 }}>{selectedIds.size} selected</p>
+                  <button onClick={deleteSelected} style={{ background:"rgba(248,113,113,0.15)", border:"1px solid rgba(248,113,113,0.3)", borderRadius:"50px", padding:"8px 20px", color:"#f87171", fontFamily:"'Outfit',sans-serif", fontSize:"14px", fontWeight:"600", cursor:"pointer", display:"flex", alignItems:"center", gap:"6px" }}>
                     <Trash2 size={14} /> Delete selected
                   </button>
-                  <button
-                    onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
-                    style={{
-                      background:"none", border:"none", color:"rgba(255,255,255,0.3)",
-                      fontFamily:"'Outfit',sans-serif", fontSize:"14px", cursor:"pointer",
-                    }}
-                  >
+                  <button onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }} style={{ background:"none", border:"none", color:"rgba(255,255,255,0.3)", fontFamily:"'Outfit',sans-serif", fontSize:"14px", cursor:"pointer" }}>
                     Cancel
                   </button>
                 </motion.div>
               )}
             </AnimatePresence>
-
           </motion.div>
         )}
       </main>
+
+      {/* ── Monthly Modal ── */}
+      <AnimatePresence>
+        {showMonthly && (
+          <MonthlyModal
+            onClose={() => setShowMonthly(false)}
+            transactions={transactions}
+            user={user}
+            db={db}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
