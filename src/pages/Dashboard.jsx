@@ -4,7 +4,7 @@ import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, writeBatc
 import { signOut } from "firebase/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { Trash2, LogOut, Upload, TrendingUp, TrendingDown, Plus, ChevronLeft, ChevronRight, X, Check } from "lucide-react";
+import { Trash2, LogOut, Upload, TrendingUp, TrendingDown, Plus, ChevronLeft, X, Check } from "lucide-react";
 
 const COLORS = ["#a78bfa", "#60a5fa", "#f472b6", "#34d399", "#fb923c", "#e879f9"];
 
@@ -28,341 +28,6 @@ function useLongPress(callback, ms = 500) {
   return { onMouseDown: start, onMouseUp: stop, onMouseLeave: stop, onTouchStart: start, onTouchEnd: stop };
 }
 
-// ── Monthly Income/Expense Modal ──────────────────────────────────────────────
-function MonthlyModal({ onClose, transactions, user, db }) {
-  const now = new Date();
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const [viewYear, setViewYear]   = useState(now.getFullYear());
-  const [addType, setAddType]     = useState("income");
-  const [addAmount, setAddAmount] = useState("");
-  const [addCat, setAddCat]       = useState("Salary");
-  const [addNote, setAddNote]     = useState("");
-  const [addDate, setAddDate]     = useState(now.toISOString().split("T")[0]);
-  const [saving, setSaving]       = useState(false);
-  const [saved, setSaved]         = useState(false);
-  const [filterTab, setFilterTab] = useState("all"); // all | income | expense
-
-  const monthKey = `${viewYear}-${viewMonth}`;
-
-  // All transactions for the selected month
-  const monthTxns = transactions.filter(t => {
-    if (!t.createdAt?.seconds) return false;
-    const d = new Date(t.createdAt.seconds * 1000);
-    return d.getMonth() === viewMonth && d.getFullYear() === viewYear;
-  });
-
-  const totalIncome  = monthTxns.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
-  const totalExpense = monthTxns.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
-  const net = totalIncome - totalExpense;
-
-  const displayed = filterTab === "all" ? monthTxns
-    : monthTxns.filter(t => t.type === filterTab);
-
-  const prevMonth = () => {
-    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
-    else setViewMonth(m => m - 1);
-  };
-  const nextMonth = () => {
-    const nextM = viewMonth === 11 ? 0 : viewMonth + 1;
-    const nextY = viewMonth === 11 ? viewYear + 1 : viewYear;
-    if (nextY > now.getFullYear() || (nextY === now.getFullYear() && nextM > now.getMonth())) return;
-    setViewMonth(nextM); setViewYear(nextY);
-  };
-  const isCurrentMonth = viewMonth === now.getMonth() && viewYear === now.getFullYear();
-
-  const handleSave = async () => {
-    const val = parseFloat(addAmount);
-    if (!val || val <= 0) return;
-    setSaving(true);
-    const chosenDate = new Date(addDate + "T12:00:00");
-    await addDoc(collection(db, "transactions"), {
-      amount: val, type: addType, category: addCat, desc: addNote,
-      userId: user.uid,
-      createdAt: { seconds: Math.floor(chosenDate.getTime() / 1000), nanoseconds: 0 },
-      bankDate: addDate,
-    });
-    setAddAmount(""); setAddNote("");
-    setSaving(false); setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
-  };
-
-  const deleteOne = async (id) => await deleteDoc(doc(db, "transactions", id));
-
-  const fmt = (n) => `Rs. ${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      style={{
-        position: "fixed", inset: 0, zIndex: 200,
-        background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "16px",
-      }}
-      onClick={e => e.target === e.currentTarget && onClose()}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 24 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 24 }}
-        transition={{ type: "spring", stiffness: 300, damping: 28 }}
-        style={{
-          width: "100%", maxWidth: "820px", maxHeight: "92vh",
-          overflowY: "auto",
-          background: "rgba(15,12,41,0.97)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          borderRadius: "28px",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.6)",
-          fontFamily: "'Outfit', sans-serif",
-          color: "white",
-        }}
-      >
-        {/* ── Header ── */}
-        <div style={{ padding: "28px 28px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <h2 style={{ fontSize: "20px", fontWeight: "800", margin: "0 0 4px", letterSpacing: "-0.01em" }}>Monthly Tracker</h2>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.35)", margin: 0, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase" }}>Income & Expenses</p>
-          </div>
-          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", color: "rgba(255,255,255,0.5)", cursor: "pointer", padding: "8px", display: "flex" }}>
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* ── Month Navigator ── */}
-        <div style={{ padding: "20px 28px 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <button onClick={prevMonth} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", color: "rgba(255,255,255,0.6)", cursor: "pointer", padding: "8px 12px", display: "flex", alignItems: "center", gap: 4 }}>
-            <ChevronLeft size={16} /> Prev
-          </button>
-
-          <div style={{ textAlign: "center" }}>
-            <p style={{ fontSize: "22px", fontWeight: "800", margin: 0, letterSpacing: "-0.02em" }}>
-              {MONTHS[viewMonth]} {viewYear}
-            </p>
-            {isCurrentMonth && (
-              <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(167,139,250,0.8)", background: "rgba(167,139,250,0.12)", borderRadius: "50px", padding: "2px 10px" }}>
-                Current month
-              </span>
-            )}
-          </div>
-
-          <button onClick={nextMonth} disabled={isCurrentMonth} style={{ background: isCurrentMonth ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", color: isCurrentMonth ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.6)", cursor: isCurrentMonth ? "default" : "pointer", padding: "8px 12px", display: "flex", alignItems: "center", gap: 4 }}>
-            Next <ChevronRight size={16} />
-          </button>
-        </div>
-
-        {/* ── Month Pill Selector ── */}
-        <div style={{ padding: "16px 28px 0", display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          {MONTHS.map((m, i) => {
-            const isDisabled = viewYear === now.getFullYear() && i > now.getMonth();
-            const isActive = i === viewMonth;
-            return (
-              <button key={m} disabled={isDisabled}
-                onClick={() => setViewMonth(i)}
-                style={{
-                  padding: "5px 13px", borderRadius: "50px", border: "1px solid",
-                  fontSize: "12px", fontWeight: 600, fontFamily: "'Outfit',sans-serif",
-                  cursor: isDisabled ? "default" : "pointer",
-                  background: isActive ? "linear-gradient(135deg,rgba(120,40,200,0.7),rgba(40,120,200,0.7))" : "rgba(255,255,255,0.04)",
-                  borderColor: isActive ? "rgba(167,139,250,0.4)" : "rgba(255,255,255,0.08)",
-                  color: isActive ? "white" : isDisabled ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.45)",
-                  transition: "all 0.2s",
-                }}
-              >
-                {m.slice(0,3)}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "20px 28px" }}>
-
-          {/* ── Left: Summary + Transactions ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-
-            {/* Metric cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
-              {[
-                { label: "Income", value: fmt(totalIncome), color: "#34d399", bg: "rgba(52,211,153,0.08)", border: "rgba(52,211,153,0.15)" },
-                { label: "Expenses", value: fmt(totalExpense), color: "#f87171", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.15)" },
-                { label: "Net", value: (net < 0 ? "−" : "") + fmt(Math.abs(net)), color: net >= 0 ? "#34d399" : "#f87171", bg: net >= 0 ? "rgba(52,211,153,0.06)" : "rgba(248,113,113,0.06)", border: net >= 0 ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)" },
-              ].map(({ label, value, color, bg, border }) => (
-                <div key={label} style={{ background: bg, border: `1px solid ${border}`, borderRadius: "16px", padding: "14px 12px" }}>
-                  <p style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", margin: "0 0 6px" }}>{label}</p>
-                  <p style={{ fontSize: "14px", fontWeight: 800, color, margin: 0, letterSpacing: "-0.01em" }}>{value}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* Mini bar chart */}
-            {monthTxns.length > 0 && (
-              <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "16px", padding: "16px" }}>
-                <p style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", margin: "0 0 12px" }}>Overview</p>
-                <ResponsiveContainer width="100%" height={110}>
-                  <BarChart data={[{ name: MONTHS[viewMonth].slice(0,3), income: totalIncome, expense: totalExpense }]} barGap={6}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11, fontFamily: "Outfit" }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 10, fontFamily: "Outfit" }} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} />
-                    <Tooltip
-                      contentStyle={{ background: "rgba(15,12,41,0.95)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", fontFamily: "Outfit", fontSize: "12px" }}
-                      formatter={(val, name) => [`Rs. ${val.toLocaleString("en-IN")}`, name === "income" ? "Income" : "Expense"]}
-                    />
-                    <Bar dataKey="income" fill="rgba(52,211,153,0.75)" radius={[5,5,0,0]} maxBarSize={48} />
-                    <Bar dataKey="expense" fill="rgba(248,113,113,0.75)" radius={[5,5,0,0]} maxBarSize={48} />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div style={{ display: "flex", gap: "14px", marginTop: "6px" }}>
-                  <span style={{ fontSize: "11px", color: "rgba(52,211,153,0.7)", display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, background: "rgba(52,211,153,0.75)", borderRadius: 2, display: "inline-block" }}></span>Income</span>
-                  <span style={{ fontSize: "11px", color: "rgba(248,113,113,0.7)", display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, background: "rgba(248,113,113,0.75)", borderRadius: 2, display: "inline-block" }}></span>Expense</span>
-                </div>
-              </div>
-            )}
-
-            {/* Transaction list */}
-            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "16px", overflow: "hidden" }}>
-              {/* Filter tabs */}
-              <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "4px" }}>
-                {[["all","All"],["income","Income"],["expense","Expenses"]].map(([key, label]) => (
-                  <button key={key} onClick={() => setFilterTab(key)}
-                    style={{
-                      flex: 1, padding: "7px", border: "none", borderRadius: "8px",
-                      fontFamily: "'Outfit',sans-serif", fontSize: "12px", fontWeight: 600,
-                      cursor: "pointer", transition: "all 0.2s",
-                      background: filterTab === key ? "rgba(167,139,250,0.15)" : "transparent",
-                      color: filterTab === key ? "rgba(167,139,250,1)" : "rgba(255,255,255,0.35)",
-                    }}
-                  >{label}</button>
-                ))}
-              </div>
-
-              <div style={{ maxHeight: "240px", overflowY: "auto", padding: "8px" }}>
-                {displayed.length === 0 ? (
-                  <p style={{ textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: "13px", padding: "24px 0" }}>
-                    No {filterTab === "all" ? "" : filterTab} transactions in {MONTHS[viewMonth]}
-                  </p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    {displayed.map(t => (
-                      <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 10px", background: "rgba(255,255,255,0.03)", borderRadius: "10px", transition: "background 0.15s" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                          <div style={{ width: 30, height: 30, borderRadius: "8px", background: t.type === "income" ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                            {t.type === "income" ? <TrendingUp size={14} color="#34d399" /> : <TrendingDown size={14} color="#f87171" />}
-                          </div>
-                          <div>
-                            <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.8)", margin: 0 }}>{t.desc || t.category}</p>
-                            <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.3)", margin: "2px 0 0" }}>{t.category}</p>
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <p style={{ fontSize: "13px", fontWeight: 700, color: t.type === "income" ? "#34d399" : "#f87171", margin: 0, whiteSpace: "nowrap" }}>
-                            {t.type === "income" ? "+" : "−"} Rs. {t.amount.toLocaleString("en-IN")}
-                          </p>
-                          <button onClick={() => deleteOne(t.id)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.15)", cursor: "pointer", padding: 3, borderRadius: 5, display: "flex", transition: "color 0.2s" }}
-                            onMouseEnter={e => e.currentTarget.style.color = "rgba(248,113,113,0.7)"}
-                            onMouseLeave={e => e.currentTarget.style.color = "rgba(255,255,255,0.15)"}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ── Right: Add Entry ── */}
-          <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "20px", padding: "20px", display: "flex", flexDirection: "column", gap: "14px", position: "relative", overflow: "hidden" }}>
-
-            {/* Saved flash */}
-            <AnimatePresence>
-              {saved && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  style={{ position: "absolute", inset: 0, background: "rgba(15,12,41,0.96)", backdropFilter: "blur(16px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10, borderRadius: "20px" }}>
-                  <motion.div initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}
-                    style={{ width: 52, height: 52, background: "rgba(52,211,153,0.15)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-                    <Check size={24} color="#34d399" />
-                  </motion.div>
-                  <p style={{ color: "#34d399", fontWeight: 700, fontSize: 15, margin: 0 }}>Saved!</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <p style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-              Add to {MONTHS[viewMonth]}
-            </p>
-
-            {/* Type toggle */}
-            <div style={{ display: "flex", gap: "5px", background: "rgba(255,255,255,0.04)", borderRadius: "10px", padding: "3px" }}>
-              {["income","expense"].map(t => (
-                <button key={t} onClick={() => { setAddType(t); setAddCat(t === "income" ? "Salary" : "Food"); }}
-                  style={{
-                    flex: 1, padding: "9px", border: "1px solid", borderRadius: "8px",
-                    fontFamily: "'Outfit',sans-serif", fontSize: "13px", fontWeight: 600,
-                    cursor: "pointer", transition: "all 0.2s",
-                    background: addType === t ? (t === "income" ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)") : "transparent",
-                    borderColor: addType === t ? (t === "income" ? "rgba(52,211,153,0.25)" : "rgba(248,113,113,0.25)") : "transparent",
-                    color: addType === t ? (t === "income" ? "#34d399" : "#f87171") : "rgba(255,255,255,0.3)",
-                    textTransform: "capitalize",
-                  }}
-                >{t}</button>
-              ))}
-            </div>
-
-            {/* Amount */}
-            <div>
-              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Amount</label>
-              <div style={{ position: "relative" }}>
-                <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.3)", fontSize: 14, fontWeight: 600 }}>Rs.</span>
-                <input type="number" placeholder="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleSave()}
-                  style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "11px 14px 11px 42px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "17px", fontWeight: 700, outline: "none" }}
-                />
-              </div>
-            </div>
-
-            {/* Category */}
-            <div>
-              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Category</label>
-              <select value={addCat} onChange={e => setAddCat(e.target.value)}
-                style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 14px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", outline: "none" }}>
-                {(addType === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(c => (
-                  <option key={c} value={c} style={{ background: "#302b63" }}>{c}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Note */}
-            <div>
-              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Note <span style={{ color: "rgba(255,255,255,0.2)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(optional)</span></label>
-              <input type="text" placeholder="e.g. May salary, Rent payment" value={addNote} onChange={e => setAddNote(e.target.value)}
-                style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 14px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", outline: "none" }}
-              />
-            </div>
-
-            {/* Date */}
-            <div>
-              <label style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.35)", marginBottom: 6, display: "block" }}>Date</label>
-              <input type="date" value={addDate} onChange={e => setAddDate(e.target.value)}
-                max={new Date().toISOString().split("T")[0]}
-                style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 14px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", outline: "none", colorScheme: "dark" }}
-              />
-            </div>
-
-            <button onClick={handleSave} disabled={saving}
-              style={{ width: "100%", padding: "13px", background: "linear-gradient(135deg, rgba(120,40,200,0.9), rgba(40,120,200,0.9))", border: "none", borderRadius: "12px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "14px", fontWeight: 700, letterSpacing: "0.05em", cursor: saving ? "default" : "pointer", boxShadow: "0 6px 24px rgba(120,40,200,0.35)", transition: "all 0.2s", opacity: saving ? 0.6 : 1 }}>
-              {saving ? "Saving..." : `Add ${addType === "income" ? "Income" : "Expense"}`}
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [amount, setAmount]         = useState("");
   const [type, setType]             = useState("expense");
@@ -377,7 +42,6 @@ export default function Dashboard() {
   const [filterMonth, setFilterMonth]   = useState("All");
   const [selectedIds, setSelectedIds]   = useState(new Set());
   const [selectMode, setSelectMode]     = useState(false);
-  const [showMonthly, setShowMonthly]   = useState(false);   // ← Monthly modal toggle
 
   const user = auth.currentUser;
 
@@ -579,13 +243,10 @@ export default function Dashboard() {
 
   // ── Current month summary for Dashboard tab quick card ──
   const now = new Date();
-  const currentMonthTxns = transactions.filter(t => {
     if (!t.createdAt?.seconds) return false;
     const d = new Date(t.createdAt.seconds * 1000);
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   });
-  const currentMonthIncome  = currentMonthTxns.filter(t => t.type === "income").reduce((s,t)=>s+t.amount,0);
-  const currentMonthExpense = currentMonthTxns.filter(t => t.type === "expense").reduce((s,t)=>s+t.amount,0);
 
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)", fontFamily: "'Outfit', sans-serif", color: "white", position: "relative" }}>
@@ -658,44 +319,6 @@ export default function Dashboard() {
         {/* ── DASHBOARD TAB ── */}
         {activeTab === "dashboard" && (
           <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }}>
-
-            {/* ── Monthly Income & Expenses CTA card ── */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              onClick={() => setShowMonthly(true)}
-              className="monthly-cta"
-              style={{
-                cursor: "pointer",
-                background: "linear-gradient(135deg, rgba(120,40,200,0.25) 0%, rgba(40,120,200,0.2) 100%)",
-                border: "1px solid rgba(167,139,250,0.25)",
-                borderRadius: "20px",
-                padding: "20px 24px",
-                marginBottom: "24px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "16px",
-                boxShadow: "0 4px 24px rgba(120,40,200,0.2)",
-                transition: "all 0.25s ease",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                <div style={{ width: 46, height: 46, borderRadius: "14px", background: "rgba(167,139,250,0.15)", border: "1px solid rgba(167,139,250,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-                  </svg>
-                </div>
-                <div>
-                  <p style={{ fontSize: "15px", fontWeight: 700, color: "rgba(255,255,255,0.9)", margin: "0 0 2px" }}>Monthly Income & Expenses</p>
-                  <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-                    {MONTHS[now.getMonth()]} — Income: <span style={{ color: "#34d399", fontWeight: 600 }}>{fmt(currentMonthIncome)}</span> · Expenses: <span style={{ color: "#f87171", fontWeight: 600 }}>{fmt(currentMonthExpense)}</span>
-                  </p>
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, color: "rgba(167,139,250,0.8)", fontSize: "13px", fontWeight: 600, flexShrink: 0 }}>
-                View & Add <ChevronRight size={16} />
-              </div>
-            </motion.div>
 
             {/* Month filter */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"24px" }}>
@@ -1000,17 +623,6 @@ export default function Dashboard() {
         )}
       </main>
 
-      {/* ── Monthly Modal ── */}
-      <AnimatePresence>
-        {showMonthly && (
-          <MonthlyModal
-            onClose={() => setShowMonthly(false)}
-            transactions={transactions}
-            user={user}
-            db={db}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }
