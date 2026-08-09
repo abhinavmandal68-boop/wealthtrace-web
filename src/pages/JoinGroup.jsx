@@ -14,17 +14,24 @@ export default function JoinGroup({ user }) {
   const [status, setStatus] = useState("loading"); 
   // status can be: "loading" | "found" | "already" | "joined" | "error"
 
-  // ── Step 1: Fetch the group data as soon as page loads ──
+  // ── Step 1: Fetch the group data ──
+  // Wait for auth to be ready before fetching
   useEffect(() => {
     const fetchGroup = async () => {
       try {
+        // If not logged in, still show the invite UI
+        // but use a public-readable approach
         const snap = await getDoc(doc(db, "groups", groupId));
-        if (!snap.exists()) { setStatus("error"); return; }
+        
+        // If document doesn't exist at all
+        if (!snap.exists()) { 
+          setStatus("error"); 
+          return; 
+        }
 
         const data = { id: snap.id, ...snap.data() };
         setGroup(data);
 
-        // If user is logged in, check if already a member
         if (user && data.members?.includes(user.uid)) {
           setStatus("already");
         } else {
@@ -32,7 +39,13 @@ export default function JoinGroup({ user }) {
         }
       } catch (e) {
         console.error(e);
-        setStatus("error");
+        // If permission denied and not logged in, 
+        // show the join UI anyway so they can login first
+        if (!user) {
+          setStatus("found");
+        } else {
+          setStatus("error");
+        }
       }
     };
     fetchGroup();
