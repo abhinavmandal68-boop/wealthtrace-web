@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { db, auth } from "../firebase";
 import {
   collection, addDoc, query, where, onSnapshot,
@@ -37,6 +38,7 @@ function useLongPress(callback, ms = 500) {
 // ── Component ──────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const user = auth.currentUser;
+  const navigate = useNavigate();
 
   // Form state
   const todayStr = new Date().toISOString().split("T")[0];
@@ -326,6 +328,9 @@ export default function Dashboard() {
               {label}
             </button>
           ))}
+          <button className="tab-btn" onClick={() => navigate("/groups")}>
+            Groups
+          </button>
         </div>
       </div>
 
