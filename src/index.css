@@ -55,9 +55,10 @@
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Shared responsive helpers                                                   */
-/* -------------------------------------------------------------------------- */
+
+/* =========================================================
+   SHARED RESPONSIVE HELPERS
+   ========================================================= */
 
 .page-shell {
   width: 100%;
@@ -77,8 +78,17 @@
   width: 100%;
 }
 
+
+/* =========================================================
+   TABLET / MOBILE
+   ========================================================= */
+
 @media (max-width: 768px) {
-  /* Prevent desktop padding from making the page wider than the viewport. */
+
+  /* -------------------------------------------------------
+     GENERAL DASHBOARD WIDTH
+     ------------------------------------------------------- */
+
   .dashboard-header,
   .dashboard-tabs-wrap,
   .dashboard-main {
@@ -90,42 +100,94 @@
     padding: 18px 16px !important;
   }
 
-  .dashboard-tabs-wrap {
-    padding: 0 16px 18px !important;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
 
-  .dashboard-tabs-wrap::-webkit-scrollbar {
-    display: none;
+  /* =======================================================
+     DASHBOARD NAVIGATION
+     
+     IMPORTANT:
+     No horizontal scrolling.
+     All 4 tabs remain fixed inside the viewport.
+     ======================================================= */
+
+  .dashboard-tabs-wrap {
+    width: 100% !important;
+    max-width: 100% !important;
+
+    padding: 0 16px 18px !important;
+
+    /* FIX: prevent horizontal movement */
+    overflow: hidden !important;
+
+    box-sizing: border-box !important;
   }
 
   .dashboard-tabs-wrap > div {
     display: flex !important;
-    width: max-content;
-    min-width: 100%;
+
+    /* FIX: use the available screen width */
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+
+    /* FIX: prevent the navigation from becoming wider */
+    overflow: hidden !important;
+
+    box-sizing: border-box !important;
   }
 
   .dashboard-tabs-wrap .tab-btn {
-    flex: 0 0 auto;
+    /* Each tab gets exactly 25% */
+    flex: 1 1 0 !important;
+
+    width: 25% !important;
+    min-width: 0 !important;
+    max-width: 25% !important;
+
     white-space: nowrap;
-    min-height: 40px;
-    padding: 9px 13px !important;
+    text-align: center;
+
+    padding: 9px 8px !important;
+
+    box-sizing: border-box !important;
   }
+
+
+  /* -------------------------------------------------------
+     DASHBOARD MAIN CONTENT
+     ------------------------------------------------------- */
 
   .dashboard-main {
     padding: 0 16px 40px !important;
   }
+
+
+  /* -------------------------------------------------------
+     DASHBOARD CHARTS
+     ------------------------------------------------------- */
 
   .dashboard-chart-grid {
     grid-template-columns: 1fr !important;
     gap: 14px !important;
   }
 
+
+  /* -------------------------------------------------------
+     DASHBOARD CARDS
+     ------------------------------------------------------- */
+
   .dashboard-page .metric-card {
     min-width: 0 !important;
   }
+
+  .dashboard-page .glass-card {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+
+  /* -------------------------------------------------------
+     DASHBOARD TOOLBARS
+     ------------------------------------------------------- */
 
   .dashboard-page .responsive-toolbar {
     gap: 10px;
@@ -143,7 +205,11 @@
     max-width: 100%;
   }
 
-  /* Dashboard transaction rows. */
+
+  /* -------------------------------------------------------
+     TRANSACTION ROWS
+     ------------------------------------------------------- */
+
   .dashboard-page .tx-row {
     gap: 10px;
     padding: 12px 14px !important;
@@ -153,15 +219,25 @@
     min-width: 0;
   }
 
-  /* The fixed delete bar should not touch the screen edges on phones. */
+
+  /* -------------------------------------------------------
+     SELECT / DELETE BAR
+     ------------------------------------------------------- */
+
   .dashboard-page [style*="position:fixed"][style*="bottom:32px"] {
     width: calc(100% - 24px) !important;
     max-width: 520px !important;
+
     bottom: 12px !important;
+
     padding: 8px 12px !important;
   }
 
-  /* Group pages */
+
+  /* =======================================================
+     GROUPS PAGE
+     ======================================================= */
+
   .groups-page,
   .group-detail-page {
     padding-left: 12px !important;
@@ -170,8 +246,14 @@
 
   .groups-content,
   .group-detail-content {
+    width: 100% !important;
     max-width: 100% !important;
   }
+
+
+  /* -------------------------------------------------------
+     GROUP HEADER
+     ------------------------------------------------------- */
 
   .groups-header {
     margin-bottom: 20px !important;
@@ -190,6 +272,11 @@
     padding: 8px 12px !important;
   }
 
+
+  /* -------------------------------------------------------
+     GROUP CREATE / JOIN BUTTONS
+     ------------------------------------------------------- */
+
   .groups-content .form-actions {
     flex-direction: column;
   }
@@ -198,16 +285,20 @@
     width: 100% !important;
   }
 
-  .groups-content > div > div[style*="display: flex"] {
-    min-width: 0;
-  }
 
-  /* Group cards: keep text readable while preserving action buttons. */
+  /* -------------------------------------------------------
+     GROUP CARDS
+     ------------------------------------------------------- */
+
   .groups-content [style*="padding: 20px 24px"] {
     padding: 16px !important;
   }
 
-  /* Group detail */
+
+  /* =======================================================
+     GROUP DETAIL PAGE
+     ======================================================= */
+
   .group-detail-page {
     padding-top: 16px !important;
     padding-bottom: 100px !important;
@@ -220,11 +311,14 @@
   .group-header h1 {
     font-size: 18px !important;
     line-height: 1.25 !important;
+
     overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .group-header p {
     overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .group-detail-content .responsive-toolbar {
@@ -235,7 +329,11 @@
     min-width: 0;
   }
 
-  /* Expense rows */
+
+  /* -------------------------------------------------------
+     GROUP EXPENSE ROWS
+     ------------------------------------------------------- */
+
   .group-detail-content [style*="padding: 16px 20px"] {
     padding: 14px !important;
   }
@@ -246,16 +344,27 @@
 
   .group-detail-content [style*="padding: 16px 20px"] p {
     overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
-  /* Add-expense sheet */
+
+  /* -------------------------------------------------------
+     ADD EXPENSE BOTTOM SHEET
+     ------------------------------------------------------- */
+
   .mobile-bottom-sheet {
     width: 100% !important;
     max-width: 100% !important;
+
     border-radius: 22px 22px 0 0 !important;
+
     padding: 20px 16px 28px !important;
+
     max-height: 90vh;
+
     overflow-y: auto;
+    overflow-x: hidden;
+
     -webkit-overflow-scrolling: touch;
   }
 
@@ -265,7 +374,11 @@
     min-height: 46px;
   }
 
-  /* Invite / join page */
+
+  /* =======================================================
+     JOIN GROUP
+     ======================================================= */
+
   .join-page {
     padding: 16px !important;
   }
@@ -273,11 +386,17 @@
   .join-card {
     width: 100% !important;
     max-width: 420px !important;
+
     padding: 30px 20px !important;
+
     border-radius: 24px !important;
   }
 
-  /* Login page */
+
+  /* =======================================================
+     LOGIN
+     ======================================================= */
+
   .login-page {
     padding: 16px !important;
   }
@@ -285,8 +404,11 @@
   .login-card {
     width: 100% !important;
     max-width: 420px !important;
+
     margin: 0 !important;
+
     padding: 34px 22px !important;
+
     border-radius: 24px !important;
   }
 
@@ -299,7 +421,14 @@
   }
 }
 
+
+/* =========================================================
+   SMALL PHONES
+   ========================================================= */
+
 @media (max-width: 480px) {
+
+  /* Dashboard header */
   .dashboard-header {
     padding: 16px 12px !important;
   }
@@ -308,6 +437,22 @@
     font-size: 21px !important;
   }
 
+
+  /* Dashboard navigation */
+  .dashboard-tabs-wrap {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .dashboard-tabs-wrap .tab-btn {
+    padding-left: 5px !important;
+    padding-right: 5px !important;
+
+    font-size: 13px !important;
+  }
+
+
+  /* Dashboard content */
   .dashboard-main {
     padding-left: 12px !important;
     padding-right: 12px !important;
@@ -322,6 +467,8 @@
     padding-right: 16px !important;
   }
 
+
+  /* Groups */
   .groups-page,
   .group-detail-page {
     padding-left: 8px !important;
@@ -337,24 +484,40 @@
     padding: 8px 10px !important;
   }
 
+
+  /* Join */
   .join-card {
     padding: 28px 18px !important;
   }
 
+
+  /* Login */
   .login-card {
     padding: 30px 18px !important;
   }
 }
 
+
+/* =========================================================
+   VERY SMALL PHONES
+   ========================================================= */
+
 @media (max-width: 360px) {
+
   .dashboard-header {
     padding-left: 10px !important;
     padding-right: 10px !important;
   }
 
   .dashboard-tabs-wrap {
-    padding-left: 10px !important;
-    padding-right: 10px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  .dashboard-tabs-wrap .tab-btn {
+    font-size: 12px !important;
+    padding-left: 3px !important;
+    padding-right: 3px !important;
   }
 
   .dashboard-main {
@@ -374,8 +537,13 @@
   }
 }
 
-/* Accessibility / touch improvements */
+
+/* =========================================================
+   TOUCH DEVICES
+   ========================================================= */
+
 @media (hover: none) and (pointer: coarse) {
+
   button,
   select,
   input {
