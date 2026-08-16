@@ -4,9 +4,386 @@
   --color-ice-blue: #f0f7ff;
 }
 
-/* This ensures Tailwind resets the browser's ugly default buttons */
 @layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    width: 100%;
+    min-height: 100%;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    width: 100%;
+    min-height: 100vh;
+    overflow-x: hidden;
+    background: #0f0c29;
+  }
+
+  #root {
+    width: 100%;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
   button {
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input,
+  select,
+  textarea {
+    max-width: 100%;
+  }
+
+  img,
+  svg {
+    max-width: 100%;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared responsive helpers                                                   */
+/* -------------------------------------------------------------------------- */
+
+.page-shell {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.mobile-content {
+  width: 100%;
+}
+
+.responsive-toolbar {
+  min-width: 0;
+}
+
+.form-actions {
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  /* Prevent desktop padding from making the page wider than the viewport. */
+  .dashboard-header,
+  .dashboard-tabs-wrap,
+  .dashboard-main {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .dashboard-header {
+    padding: 18px 16px !important;
+  }
+
+  .dashboard-tabs-wrap {
+    padding: 0 16px 18px !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .dashboard-tabs-wrap::-webkit-scrollbar {
+    display: none;
+  }
+
+  .dashboard-tabs-wrap > div {
+    display: flex !important;
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .dashboard-tabs-wrap .tab-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    min-height: 40px;
+    padding: 9px 13px !important;
+  }
+
+  .dashboard-main {
+    padding: 0 16px 40px !important;
+  }
+
+  .dashboard-chart-grid {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+
+  .dashboard-page .metric-card {
+    min-width: 0 !important;
+  }
+
+  .dashboard-page .responsive-toolbar {
+    gap: 10px;
+  }
+
+  .dashboard-filter-bar {
+    flex-wrap: wrap;
+  }
+
+  .dashboard-filter-bar > * {
+    min-width: 0;
+  }
+
+  .dashboard-filter-bar select {
+    max-width: 100%;
+  }
+
+  /* Dashboard transaction rows. */
+  .dashboard-page .tx-row {
+    gap: 10px;
+    padding: 12px 14px !important;
+  }
+
+  .dashboard-page .tx-row > div:last-child {
+    min-width: 0;
+  }
+
+  /* The fixed delete bar should not touch the screen edges on phones. */
+  .dashboard-page [style*="position:fixed"][style*="bottom:32px"] {
+    width: calc(100% - 24px) !important;
+    max-width: 520px !important;
+    bottom: 12px !important;
+    padding: 8px 12px !important;
+  }
+
+  /* Group pages */
+  .groups-page,
+  .group-detail-page {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .groups-content,
+  .group-detail-content {
+    max-width: 100% !important;
+  }
+
+  .groups-header {
+    margin-bottom: 20px !important;
+  }
+
+  .groups-header > div {
+    min-width: 0;
+  }
+
+  .groups-header h1 {
+    font-size: 20px !important;
+  }
+
+  .groups-header > button:last-child {
+    flex-shrink: 0;
+    padding: 8px 12px !important;
+  }
+
+  .groups-content .form-actions {
+    flex-direction: column;
+  }
+
+  .groups-content .form-actions button {
+    width: 100% !important;
+  }
+
+  .groups-content > div > div[style*="display: flex"] {
+    min-width: 0;
+  }
+
+  /* Group cards: keep text readable while preserving action buttons. */
+  .groups-content [style*="padding: 20px 24px"] {
+    padding: 16px !important;
+  }
+
+  /* Group detail */
+  .group-detail-page {
+    padding-top: 16px !important;
+    padding-bottom: 100px !important;
+  }
+
+  .group-header {
+    margin-bottom: 18px !important;
+  }
+
+  .group-header h1 {
+    font-size: 18px !important;
+    line-height: 1.25 !important;
+    overflow-wrap: anywhere;
+  }
+
+  .group-header p {
+    overflow-wrap: anywhere;
+  }
+
+  .group-detail-content .responsive-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .group-detail-content .responsive-toolbar > * {
+    min-width: 0;
+  }
+
+  /* Expense rows */
+  .group-detail-content [style*="padding: 16px 20px"] {
+    padding: 14px !important;
+  }
+
+  .group-detail-content [style*="padding: 16px 20px"] > div {
+    gap: 8px;
+  }
+
+  .group-detail-content [style*="padding: 16px 20px"] p {
+    overflow-wrap: anywhere;
+  }
+
+  /* Add-expense sheet */
+  .mobile-bottom-sheet {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 22px 22px 0 0 !important;
+    padding: 20px 16px 28px !important;
+    max-height: 90vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-bottom-sheet input,
+  .mobile-bottom-sheet select,
+  .mobile-bottom-sheet textarea {
+    min-height: 46px;
+  }
+
+  /* Invite / join page */
+  .join-page {
+    padding: 16px !important;
+  }
+
+  .join-card {
+    width: 100% !important;
+    max-width: 420px !important;
+    padding: 30px 20px !important;
+    border-radius: 24px !important;
+  }
+
+  /* Login page */
+  .login-page {
+    padding: 16px !important;
+  }
+
+  .login-card {
+    width: 100% !important;
+    max-width: 420px !important;
+    margin: 0 !important;
+    padding: 34px 22px !important;
+    border-radius: 24px !important;
+  }
+
+  .login-page .login-btn {
+    min-height: 52px;
+  }
+
+  .login-page h1 {
+    font-size: 26px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-header {
+    padding: 16px 12px !important;
+  }
+
+  .dashboard-header h1 {
+    font-size: 21px !important;
+  }
+
+  .dashboard-main {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .dashboard-page .metric-card {
+    padding: 18px !important;
+  }
+
+  .dashboard-page .glass-card {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .groups-page,
+  .group-detail-page {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  .groups-header {
+    gap: 8px !important;
+  }
+
+  .groups-header > button:last-child {
+    font-size: 13px !important;
+    padding: 8px 10px !important;
+  }
+
+  .join-card {
+    padding: 28px 18px !important;
+  }
+
+  .login-card {
+    padding: 30px 18px !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .dashboard-header {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .dashboard-tabs-wrap {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .dashboard-main {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .groups-page,
+  .group-detail-page {
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  .login-card {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+}
+
+/* Accessibility / touch improvements */
+@media (hover: none) and (pointer: coarse) {
+  button,
+  select,
+  input {
+    min-height: 44px;
+  }
+
+  .del-btn,
+  .del-expense-btn {
+    opacity: 1 !important;
   }
 }

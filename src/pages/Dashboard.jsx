@@ -262,7 +262,7 @@ export default function Dashboard() {
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight:"100vh", background:"linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)", fontFamily:"'Outfit', sans-serif", color:"white", position:"relative" }}>
+    <div className="page-shell dashboard-page" style={{ minHeight:"100vh", background:"linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)", fontFamily:"'Outfit', sans-serif", color:"white", position:"relative" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
         * { box-sizing: border-box; }
@@ -306,7 +306,7 @@ export default function Dashboard() {
       <div style={{ position:"fixed", bottom:"-10%", left:"-5%", width:"400px", height:"400px", background:"radial-gradient(circle,rgba(40,120,200,0.15) 0%,transparent 70%)", borderRadius:"50%", pointerEvents:"none", animation:"float 14s ease-in-out infinite 2s" }} />
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <header style={{ maxWidth:"1200px", margin:"0 auto", padding:"24px 32px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      <header className="dashboard-header" style={{ maxWidth:"1200px", margin:"0 auto", padding:"24px 32px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <motion.div initial={{ opacity:0, x:-20 }} animate={{ opacity:1, x:0 }} transition={{ duration:0.5 }}>
           <h1 style={{ fontSize:"24px", fontWeight:"800", background:"linear-gradient(135deg,#a78bfa,#60a5fa)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text", letterSpacing:"-0.02em", margin:0 }}>
             WealthTrace
@@ -321,7 +321,7 @@ export default function Dashboard() {
       </header>
 
       {/* ── Nav ────────────────────────────────────────────────────────── */}
-      <div style={{ maxWidth:"1200px", margin:"0 auto", padding:"0 32px 24px" }}>
+      <div className="dashboard-tabs-wrap" style={{ maxWidth:"1200px", margin:"0 auto", padding:"0 32px 24px" }}>
         <div style={{ display:"inline-flex", gap:"4px", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:"50px", padding:"4px" }}>
           {[["dashboard","Dashboard"],["add","New Transaction"],["history","History"]].map(([key, label]) => (
             <button key={key} className={`tab-btn ${activeTab === key ? "active" : ""}`} onClick={() => setActiveTab(key)}>
@@ -329,20 +329,20 @@ export default function Dashboard() {
             </button>
           ))}
           <button className="tab-btn" onClick={() => navigate("/groups")}>
-            Groups
-          </button>
+         Groups
+         </button>
         </div>
       </div>
 
       {/* ── Main ───────────────────────────────────────────────────────── */}
-      <main style={{ maxWidth:"1200px", margin:"0 auto", padding:"0 32px 64px" }}>
+      <main className="dashboard-main" style={{ maxWidth:"1200px", margin:"0 auto", padding:"0 32px 64px" }}>
 
         {/* ══ DASHBOARD TAB ════════════════════════════════════════════ */}
         {activeTab === "dashboard" && (
           <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.4 }}>
 
             {/* Month filter bar */}
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"24px" }}>
+            <div className="responsive-toolbar dashboard-filter-bar" style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"24px" }}>
               <p style={{ color:"rgba(255,255,255,0.4)", fontSize:"13px", fontWeight:"500" }}>
                 {filtered.length} transaction{filtered.length !== 1 ? "s" : ""} {filterMonth !== "All" ? `in ${filterMonth}` : "total"}
               </p>
@@ -369,7 +369,7 @@ export default function Dashboard() {
 
             {/* Charts row */}
             {filtered.length > 0 ? (
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"20px", marginBottom:"20px" }}>
+              <div className="dashboard-chart-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"20px", marginBottom:"20px" }}>
                 {/* Bar chart */}
                 <div style={{ ...glassCard, padding:"28px" }}>
                   <p style={{ fontSize:"13px", fontWeight:"700", letterSpacing:"0.06em", textTransform:"uppercase", color:"rgba(255,255,255,0.5)", marginBottom:"20px" }}>Daily Flow</p>

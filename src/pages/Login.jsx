@@ -13,7 +13,7 @@ export default function Login() {
   };
 
   return (
-    <div style={{
+    <div className="page-shell login-page" style={{
       minHeight: "100vh",
       background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)",
       display: "flex",
@@ -130,6 +130,7 @@ export default function Login() {
 
       {/* Card */}
       <motion.div
+        className="login-card"
         initial={{ opacity: 0, y: 40, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}

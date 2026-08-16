@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db, auth } from "../firebase";
 import {
-  doc, getDoc, collection, addDoc, onSnapshot,
-  query, where, serverTimestamp, updateDoc, deleteDoc,
+ doc, getDoc, collection, addDoc, onSnapshot,
+  query, where, serverTimestamp, updateDoc, deleteDoc, writeBatch,
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Plus, Users, Receipt, TrendingDown, X, Check, Trash2 } from "lucide-react";
@@ -142,6 +142,17 @@ export default function GroupDetail() {
     } catch (e) { console.error(e); }
   };
 
+  // ── Delete entire group ──
+  const deleteGroup = async () => {
+    if (!window.confirm(`Delete "${group.name}"? This will remove the group and ALL its expenses permanently.`)) return;
+    try {
+      // Delete all expenses first
+      await Promise.all(expenses.map(e => deleteDoc(doc(db, "groupExpenses", e.id))));
+      // Then delete the group document itself
+      await deleteDoc(doc(db, "groups", groupId));
+      navigate("/groups");
+    } catch (e) { console.error(e); }
+  };
   const getName = (uid) => {
     if (!group?.memberNames) return "Unknown";
     if (uid === user?.uid) return "You";
@@ -177,7 +188,7 @@ export default function GroupDetail() {
     .reduce((sum, e) => sum + e.amount, 0);
 
   return (
-    <div style={{
+    <div className="page-shell group-detail-page" style={{
       minHeight: "100vh",
       background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)",
       fontFamily: "'Outfit', sans-serif",
@@ -191,7 +202,7 @@ export default function GroupDetail() {
         .clear-all-btn:hover { background: rgba(239,68,68,0.2); color: #f87171; }`}
       </style>
 
-      <div style={{ maxWidth: "480px", margin: "0 auto" }}>
+      <div className="mobile-content group-detail-content" style={{ maxWidth: "480px", margin: "0 auto" }}>
 
         {/* Header */}
         <div style={{
@@ -440,6 +451,59 @@ export default function GroupDetail() {
           </div>
         )}
 
+      {/* ── Danger Zone ── */}
+        <div style={{
+          marginTop: "32px",
+          padding: "20px",
+          background: "rgba(239,68,68,0.05)",
+          border: "1px dashed rgba(239,68,68,0.2)",
+          borderRadius: "16px",
+        }}>
+          <p style={{
+            fontSize: "11px",
+            fontWeight: "600",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            color: "rgba(239,68,68,0.5)",
+            marginBottom: "12px",
+          }}>
+            Danger Zone
+          </p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "14px", fontWeight: "600", margin: 0 }}>
+                Delete this group
+              </p>
+              <p style={{ color: "rgba(255,255,255,0.25)", fontSize: "12px", margin: "4px 0 0" }}>
+                Removes the group and all its expenses
+              </p>
+              
+            </div>
+            <button
+              onClick={deleteGroup}
+              style={{
+                padding: "9px 18px",
+                background: "rgba(239,68,68,0.12)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                borderRadius: "10px",
+                color: "#f87171",
+                fontFamily: "'Outfit',sans-serif",
+                fontSize: "13px",
+                fontWeight: "600",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.22)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
+            >
+              <Trash2 size={13} /> Delete Group
+            </button>
+          </div>
+        </div>
+
       </div>
 
       {/* Add Expense Modal */}
@@ -464,6 +528,7 @@ export default function GroupDetail() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 60 }}
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              className="mobile-bottom-sheet"
               style={{
                 position: "fixed",
                 bottom: 0,

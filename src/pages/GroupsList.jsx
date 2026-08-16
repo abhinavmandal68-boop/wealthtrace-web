@@ -148,10 +148,10 @@ export default function GroupsList() {
     }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');`}</style>
 
-      <div style={{ maxWidth: "480px", margin: "0 auto" }}>
+      <div className="mobile-content groups-content" style={{ maxWidth: "480px", margin: "0 auto" }}>
 
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "28px" }}>
+        <div className="groups-header responsive-toolbar" style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "28px" }}>
           <button
             onClick={() => navigate("/")}
             style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "12px", padding: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "white" }}
@@ -190,7 +190,7 @@ export default function GroupsList() {
                 onKeyDown={(e) => e.key === "Enter" && createGroup()}
                 style={{ width: "100%", padding: "12px 16px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "12px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "15px", outline: "none", boxSizing: "border-box", marginBottom: "12px" }}
               />
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div className="form-actions" style={{ display: "flex", gap: "8px" }}>
                 <button
                   onClick={createGroup}
                   disabled={creating || !groupName.trim()}
@@ -237,7 +237,7 @@ export default function GroupsList() {
                 <p style={{ color: "#f87171", fontSize: "13px", marginBottom: "12px" }}>{joinError}</p>
               )}
               {!joinError && <div style={{ marginBottom: "12px" }} />}
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div className="form-actions" style={{ display: "flex", gap: "8px" }}>
                 <button
                   onClick={joinGroup}
                   disabled={joining || joinCode.length !== 7}

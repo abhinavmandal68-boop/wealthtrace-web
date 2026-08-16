@@ -81,7 +81,7 @@ export default function JoinGroup({ user }) {
 
   // ── UI ──
   return (
-    <div style={{
+    <div className="page-shell join-page" style={{
       minHeight: "100vh",
       background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)",
       fontFamily: "'Outfit', sans-serif",
@@ -91,6 +91,7 @@ export default function JoinGroup({ user }) {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');`}</style>
 
       <motion.div
+        className="join-card"
         initial={{ opacity: 0, y: 24, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
