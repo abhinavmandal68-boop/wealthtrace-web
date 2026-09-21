@@ -131,7 +131,7 @@ export default function Dashboard({ user }) {
   const [transactions, setTransactions] = useState([]);
   const [showSuccess, setShowSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [filterMonth, setFilterMonth] = useState("All");
+  const [filterMonth, setFilterMonth] = useState(todayStr.slice(0, 7));
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
@@ -529,6 +529,15 @@ export default function Dashboard({ user }) {
 
         const errors = [];
         const records = [];
+        const knownTransactions = new Set(
+          transactions.map((transaction) => [
+            transaction.bankDate || "",
+            Number(transaction.amount).toFixed(2),
+            transaction.type || "",
+            (transaction.desc || "").trim().toLowerCase(),
+          ].join("|"))
+        );
+        let duplicateCount = 0;
 
         lines.slice(headerIdx + 1).forEach((line, idx) => {
           if (!line) return;
@@ -621,6 +630,18 @@ export default function Dashboard({ user }) {
 
           if (finalAmount <= 0) return;
 
+          const duplicateKey = [
+            rawDate,
+            Number(finalAmount).toFixed(2),
+            transType,
+            rawDesc.trim().slice(0, 200).toLowerCase(),
+          ].join("|");
+          if (knownTransactions.has(duplicateKey)) {
+            duplicateCount += 1;
+            return;
+          }
+          knownTransactions.add(duplicateKey);
+
           const ref = doc(
             collection(db, "transactions")
           );
@@ -629,14 +650,18 @@ export default function Dashboard({ user }) {
             amount: finalAmount,
             type: transType,
             category: detectCategory(rawDesc),
-            desc: rawDesc,
+            desc: rawDesc.trim().slice(0, 200),
             userId: user.uid,
             createdAt: Timestamp.fromDate(txnDateParsed),
-            bankDate: rawDate,
+            bankDate: rawDate.trim().slice(0, 40),
             bank,
             imported: true,
           }});
         });
+
+        if (duplicateCount > 0) {
+          errors.push(`${duplicateCount} duplicate row${duplicateCount === 1 ? "" : "s"} skipped.`);
+        }
 
         if (records.length > 0) {
           for (let i = 0; i < records.length; i += 450) {
@@ -758,14 +783,26 @@ export default function Dashboard({ user }) {
     { value: "All", label: "All time" },
     ...Array.from(
       new Map(
-        transactions
+        [
+          [
+            todayStr.slice(0, 7),
+            {
+              value: todayStr.slice(0, 7),
+              label: new Date(`${todayStr.slice(0, 7)}-01T12:00:00`).toLocaleDateString("en-IN", {
+                month: "long",
+                year: "numeric",
+              }),
+            },
+          ],
+          ...transactions
           .filter((transaction) => transaction.createdAt?.seconds)
           .sort((a, b) => b.createdAt.seconds - a.createdAt.seconds)
           .map((transaction) => {
             const date = new Date(transaction.createdAt.seconds * 1000);
             const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
             return [value, { value, label: date.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) }];
-          })
+          }),
+        ]
       ).values()
     ),
   ];
@@ -1192,9 +1229,9 @@ export default function Dashboard({ user }) {
           .dashboard-nav-inner .tab-btn {
             flex: 1 1 0 !important;
 
-            width: 25% !important;
+            width: 20% !important;
             min-width: 0 !important;
-            max-width: 25% !important;
+            max-width: 20% !important;
 
             padding: 10px 4px !important;
 
@@ -1426,7 +1463,7 @@ export default function Dashboard({ user }) {
           
           FIXED:
           - width: 100%
-          - four equal tabs
+          - five equal tabs
           - no horizontal scrolling
           - no max-content
           ─────────────────────────────────────────────────────────────────── */}
@@ -1449,6 +1486,13 @@ export default function Dashboard({ user }) {
               {label}
             </button>
           ))}
+
+          <button
+            className="tab-btn"
+            onClick={() => navigate("/planning")}
+          >
+            Plan
+          </button>
 
           <button
             className="tab-btn"
@@ -2668,6 +2712,7 @@ export default function Dashboard({ user }) {
                   type="text"
                   placeholder="e.g. Grocery run, Salary credit"
                   value={desc}
+                  maxLength={200}
                   onChange={(e) =>
                     setDesc(
                       e.target.value

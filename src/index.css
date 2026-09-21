@@ -142,12 +142,151 @@
   line-height: 1;
 }
 
+/* Planning */
+.planning-page {
+  min-height: 100vh;
+  padding: 24px 16px 64px;
+  color: white;
+  background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+}
+
+.planning-content {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.planning-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.planning-header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.planning-header h1,
+.planning-section h2 {
+  margin: 0;
+  color: white;
+}
+
+.planning-header h1 { font-size: 23px; }
+.planning-header p,
+.section-title p,
+.empty-copy {
+  margin: 3px 0 0;
+  color: rgba(255,255,255,0.38);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.planning-section {
+  padding: 24px;
+  margin-bottom: 18px;
+}
+
+.section-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-bottom: 20px;
+  color: #a78bfa;
+}
+
+.section-title h2 { font-size: 17px; }
+.section-title svg { flex-shrink: 0; margin-top: 2px; }
+
+.planning-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.budget-form { grid-template-columns: 1.1fr 1fr 1fr auto; }
+.recurring-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.recurring-form .primary-button { grid-column: 1 / -1; }
+
+.planning-page option { background: #302b63; color: white; }
+
+.primary-button,
+.secondary-button,
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  border-radius: 11px;
+  color: white;
+  font-weight: 650;
+}
+
+.primary-button {
+  padding: 10px 16px;
+  border: 1px solid rgba(167,139,250,0.42);
+  background: linear-gradient(135deg, rgba(124,58,237,0.68), rgba(37,99,235,0.66));
+}
+
+.secondary-button {
+  padding: 9px 14px;
+  border: 1px solid rgba(255,255,255,0.13);
+  background: rgba(255,255,255,0.07);
+}
+
+.icon-button {
+  width: 44px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.07);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.compact { min-height: 38px; padding: 7px 12px; font-size: 12px; }
+.danger-icon { color: #f87171; border-color: rgba(248,113,113,0.2); background: rgba(248,113,113,0.08); }
+
+.budget-list,
+.recurring-list { display: grid; gap: 9px; }
+.budget-row,
+.recurring-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 13px;
+  background: rgba(255,255,255,0.035);
+}
+
+.row-copy { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.row-copy strong { font-size: 14px; }
+.row-copy span { color: rgba(255,255,255,0.48); font-size: 12px; overflow-wrap: anywhere; }
+.danger-text { color: #fca5a5 !important; }
+.row-actions { display: flex; align-items: center; gap: 7px; }
+.progress-track { height: 6px; margin-top: 4px; overflow: hidden; border-radius: 99px; background: rgba(255,255,255,0.08); }
+.progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #60a5fa, #a78bfa); }
+.progress-fill.exceeded { background: #f87171; }
+.report-actions { display: flex; align-items: center; gap: 10px; }
+.report-actions input { max-width: 230px; }
+
 
 /* =========================================================
    TABLET / MOBILE
    ========================================================= */
 
 @media (max-width: 768px) {
+
+  .planning-page { padding: 16px 12px 48px; }
+  .planning-section { padding: 18px; border-radius: 19px !important; }
+  .budget-form,
+  .recurring-form { grid-template-columns: 1fr 1fr; }
+  .budget-form .primary-button,
+  .recurring-form .primary-button { grid-column: 1 / -1; }
 
   /* -------------------------------------------------------
      GENERAL DASHBOARD WIDTH
@@ -170,7 +309,7 @@
      
      IMPORTANT:
      No horizontal scrolling.
-     All 4 tabs remain fixed inside the viewport.
+     All tabs remain fixed inside the viewport.
      ======================================================= */
 
   .dashboard-tabs-wrap {
@@ -200,12 +339,12 @@
   }
 
   .dashboard-tabs-wrap .tab-btn {
-    /* Each tab gets exactly 25% */
+    /* Each of the five tabs gets exactly 20% */
     flex: 1 1 0 !important;
 
-    width: 25% !important;
+    width: 20% !important;
     min-width: 0 !important;
-    max-width: 25% !important;
+    max-width: 20% !important;
 
     white-space: nowrap;
     text-align: center;
@@ -533,6 +672,20 @@
    ========================================================= */
 
 @media (max-width: 480px) {
+
+  .planning-header { align-items: flex-start; }
+  .planning-header .secondary-button { min-width: 44px; padding: 9px; font-size: 0; }
+  .budget-form,
+  .recurring-form { grid-template-columns: 1fr; }
+  .budget-form .primary-button,
+  .recurring-form .primary-button { grid-column: auto; }
+  .budget-row,
+  .recurring-row { align-items: flex-start; }
+  .recurring-row { flex-direction: column; }
+  .row-actions { width: 100%; justify-content: flex-end; }
+  .report-actions { align-items: stretch; flex-direction: column; }
+  .report-actions input,
+  .report-actions button { width: 100%; max-width: none; }
 
   /* Dashboard header */
   .dashboard-header {

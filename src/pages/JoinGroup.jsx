@@ -1,225 +1,106 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { db, auth } from "../firebase";
-import { doc, getDoc, updateDoc, arrayUnion } from "firebase/firestore";
+import { useNavigate, useParams } from "react-router-dom";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { arrayUnion, doc, getDoc, updateDoc } from "firebase/firestore";
 import { motion } from "framer-motion";
-import { Users, LogIn, ArrowRight, CheckCircle } from "lucide-react";
+import { ArrowRight, CheckCircle, LogIn, Users } from "lucide-react";
+import { auth, db } from "../firebase";
 
 export default function JoinGroup({ user }) {
-  const { groupId } = useParams();   // reads the ID from the URL
+  const { groupId: inviteCode } = useParams();
   const navigate = useNavigate();
-
-  const [group, setGroup]   = useState(null);   // group data from Firestore
-  const [status, setStatus] = useState("loading"); 
+  const [invite, setInvite] = useState(null);
+  const [status, setStatus] = useState(user ? "loading" : "found");
   const [actionError, setActionError] = useState("");
-  // status can be: "loading" | "found" | "already" | "joined" | "error"
 
-  // ── Step 1: Fetch the group data ──
-  // Wait for auth to be ready before fetching
   useEffect(() => {
-    const fetchGroup = async () => {
+    if (!user) return;
+
+    const fetchInvite = async () => {
       try {
-        // If not logged in, still show the invite UI
-        // but use a public-readable approach
-        const snap = await getDoc(doc(db, "groups", groupId));
-        
-        // If document doesn't exist at all
-        if (!snap.exists()) { 
-          setStatus("error"); 
-          return; 
-        }
-
-        const data = { id: snap.id, ...snap.data() };
-        setGroup(data);
-
-        if (user && data.members?.includes(user.uid)) {
-          setStatus("already");
-        } else {
-          setStatus("found");
-        }
-      } catch (e) {
-        console.error(e);
-        // If permission denied and not logged in, 
-        // show the join UI anyway so they can login first
-        if (!user) {
-          setStatus("found");
-        } else {
+        const inviteSnap = await getDoc(doc(db, "inviteCodes", inviteCode.toUpperCase()));
+        if (!inviteSnap.exists() || inviteSnap.data().active !== true) {
           setStatus("error");
+          return;
         }
+        const inviteData = { code: inviteSnap.id, ...inviteSnap.data() };
+        setInvite(inviteData);
+
+        try {
+          const groupSnap = await getDoc(doc(db, "groups", inviteData.groupId));
+          setStatus(groupSnap.exists() && groupSnap.data().members?.includes(user.uid) ? "already" : "found");
+        } catch {
+          // A secure ruleset intentionally prevents non-members from reading the group.
+          setStatus("found");
+        }
+      } catch (error) {
+        console.error(error);
+        setStatus("error");
       }
     };
-    fetchGroup();
-  }, [groupId, user]);
 
-  // ── Step 2: Login with Google ──
+    fetchInvite();
+  }, [inviteCode, user]);
+
   const handleLogin = async () => {
     setActionError("");
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      // App.jsx will detect login and re-render, user prop updates
-    } catch (e) {
-      console.error(e);
-      if (e.code !== "auth/popup-closed-by-user") {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (error) {
+      console.error(error);
+      if (error.code !== "auth/popup-closed-by-user") {
         setActionError("Sign-in failed. Check that pop-ups are allowed, then try again.");
       }
     }
   };
 
-  // ── Step 3: Join the group ──
   const handleJoin = async () => {
-    if (!user || !group) return;
+    if (!user || !invite) return;
     setStatus("loading");
     setActionError("");
     try {
-      await updateDoc(doc(db, "groups", groupId), {
+      const memberName = (user.displayName || "Member").trim().slice(0, 80) || "Member";
+      await updateDoc(doc(db, "groups", invite.groupId), {
         members: arrayUnion(user.uid),
-        [`memberNames.${user.uid}`]: user.displayName || user.email,
+        [`memberNames.${user.uid}`]: memberName,
       });
       setStatus("joined");
-      setTimeout(() => navigate(`/groups/${groupId}`), 1500);
-    } catch (e) {
-      console.error(e);
+      window.setTimeout(() => navigate(`/groups/${invite.groupId}`), 900);
+    } catch (error) {
+      console.error(error);
       setStatus("found");
       setActionError("We couldn't add you to this group. Ask the owner to verify the invite and try again.");
     }
   };
 
-  // ── UI ──
+  const groupName = invite?.groupName || "a shared WealthTrace group";
+
   return (
-    <div className="page-shell join-page" style={{
-      minHeight: "100vh",
-      background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)",
-      fontFamily: "'Outfit', sans-serif",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: "24px",
-    }}>
-      <motion.div
-        className="join-card"
-        initial={{ opacity: 0, y: 24, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        style={{
-          width: "100%", maxWidth: "400px",
-          background: "rgba(255,255,255,0.06)",
-          backdropFilter: "blur(40px)",
-          WebkitBackdropFilter: "blur(40px)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          borderRadius: "32px",
-          padding: "40px 32px",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.4)",
-          textAlign: "center",
-        }}
-      >
-        {actionError && (
-          <p role="alert" style={{ color: "#fca5a5", fontSize: "13px", lineHeight: 1.5, marginBottom: "18px" }}>
-            {actionError}
-          </p>
-        )}
-        {/* Loading */}
-        {status === "loading" && (
-          <>
-            <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "rgba(167,139,250,0.15)", border: "1px solid rgba(167,139,250,0.25)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-              <Users size={24} color="#a78bfa" />
-            </div>
-            <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "15px" }}>Loading group...</p>
-          </>
-        )}
+    <div className="page-shell join-page" style={{ minHeight: "100vh", background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
+      <motion.div className="join-card" initial={{ opacity: 0, y: 24, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5 }} style={{ width: "100%", maxWidth: "400px", background: "rgba(255,255,255,0.06)", backdropFilter: "blur(40px)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "32px", padding: "40px 32px", boxShadow: "0 32px 80px rgba(0,0,0,0.4)", textAlign: "center" }}>
+        {actionError && <p role="alert" style={{ color: "#fca5a5", fontSize: "13px", lineHeight: 1.5, marginBottom: "18px" }}>{actionError}</p>}
 
-        {/* Error */}
-        {status === "error" && (
-          <>
-            <p style={{ fontSize: "32px", marginBottom: "12px" }}>😕</p>
-            <p style={{ color: "white", fontWeight: "700", fontSize: "18px", marginBottom: "8px" }}>Link not found</p>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "14px", marginBottom: "24px" }}>This invite link is invalid or the group was deleted.</p>
-            <button onClick={() => navigate("/")} style={btnStyle}>Go to Dashboard</button>
-          </>
-        )}
+        {status === "loading" && <><IconBox><Users size={24} color="#a78bfa" /></IconBox><p style={mutedText}>Loading invitation...</p></>}
 
-        {/* Group found — not logged in yet */}
-        {status === "found" && !user && (
-          <>
-            <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "linear-gradient(135deg, rgba(167,139,250,0.3), rgba(96,165,250,0.3))", border: "1px solid rgba(167,139,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-              <Users size={24} color="#a78bfa" />
-            </div>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>You're invited to</p>
-            <h2 style={{ color: "white", fontSize: "24px", fontWeight: "800", marginBottom: "8px" }}>{group?.name}</h2>
-            <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "13px", marginBottom: "32px" }}>
-              {group?.members?.length || 1} member{group?.members?.length !== 1 ? "s" : ""} already inside
-            </p>
-            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "14px", marginBottom: "16px" }}>Sign in first to join this group</p>
-            <button onClick={handleLogin} style={btnStyle}>
-              <LogIn size={16} style={{ marginRight: "8px" }} /> Sign in with Google
-            </button>
-          </>
-        )}
+        {status === "error" && <><p style={{ fontSize: "32px", marginBottom: "12px" }}>😕</p><h2 style={heading}>Invitation not found</h2><p style={{ ...mutedText, marginBottom: "24px" }}>This code is invalid, inactive, or the group was deleted.</p><button onClick={() => navigate("/")} style={btnStyle}>Go to Dashboard</button></>}
 
-        {/* Group found — logged in, ready to join */}
-        {status === "found" && user && (
-          <>
-            <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "linear-gradient(135deg, rgba(167,139,250,0.3), rgba(96,165,250,0.3))", border: "1px solid rgba(167,139,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-              <Users size={24} color="#a78bfa" />
-            </div>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "8px" }}>You're invited to</p>
-            <h2 style={{ color: "white", fontSize: "24px", fontWeight: "800", marginBottom: "8px" }}>{group?.name}</h2>
-            <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "13px", marginBottom: "32px" }}>
-              {group?.members?.length || 1} member{group?.members?.length !== 1 ? "s" : ""} already inside
-            </p>
-            <button onClick={handleJoin} style={btnStyle}>
-              Join Group <ArrowRight size={16} style={{ marginLeft: "8px" }} />
-            </button>
-          </>
-        )}
+        {status === "found" && !user && <><IconBox><Users size={24} color="#a78bfa" /></IconBox><p style={eyebrow}>Private group invitation</p><h2 style={heading}>You've been invited</h2><p style={{ ...mutedText, marginBottom: "28px" }}>Sign in to securely view and join {groupName}.</p><button onClick={handleLogin} style={btnStyle}><LogIn size={16} /> Sign in with Google</button></>}
 
-        {/* Already a member */}
-        {status === "already" && (
-          <>
-            <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "rgba(52,211,153,0.15)", border: "1px solid rgba(52,211,153,0.3)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-              <CheckCircle size={24} color="#34d399" />
-            </div>
-            <h2 style={{ color: "white", fontSize: "22px", fontWeight: "700", marginBottom: "8px" }}>You're already in!</h2>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "14px", marginBottom: "28px" }}>{group?.name}</p>
-            <button onClick={() => navigate(`/groups/${groupId}`)} style={btnStyle}>
-              Open Group <ArrowRight size={16} style={{ marginLeft: "8px" }} />
-            </button>
-          </>
-        )}
+        {status === "found" && user && <><IconBox><Users size={24} color="#a78bfa" /></IconBox><p style={eyebrow}>You're invited to</p><h2 style={heading}>{groupName}</h2><p style={{ ...mutedText, marginBottom: "28px" }}>{invite?.currency || "INR"} group · invite code {invite?.code}</p><button onClick={handleJoin} style={btnStyle}>Join Group <ArrowRight size={16} /></button></>}
 
-        {/* Successfully joined */}
-        {status === "joined" && (
-          <>
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", stiffness: 300, damping: 20 }}
-              style={{ width: "56px", height: "56px", borderRadius: "16px", background: "rgba(52,211,153,0.15)", border: "1px solid rgba(52,211,153,0.3)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}
-            >
-              <CheckCircle size={24} color="#34d399" />
-            </motion.div>
-            <h2 style={{ color: "white", fontSize: "22px", fontWeight: "700", marginBottom: "8px" }}>Joined successfully!</h2>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "14px" }}>Taking you to {group?.name}...</p>
-          </>
-        )}
+        {status === "already" && <><IconBox success><CheckCircle size={24} color="#34d399" /></IconBox><h2 style={heading}>You're already in!</h2><p style={{ ...mutedText, marginBottom: "28px" }}>{groupName}</p><button onClick={() => navigate(`/groups/${invite.groupId}`)} style={btnStyle}>Open Group <ArrowRight size={16} /></button></>}
 
+        {status === "joined" && <><IconBox success><CheckCircle size={24} color="#34d399" /></IconBox><h2 style={heading}>Joined successfully!</h2><p style={mutedText}>Taking you to {groupName}...</p></>}
       </motion.div>
     </div>
   );
 }
 
-// Shared button style
-const btnStyle = {
-  width: "100%",
-  padding: "14px 24px",
-  background: "linear-gradient(135deg, rgba(167,139,250,0.3), rgba(96,165,250,0.3))",
-  border: "1px solid rgba(167,139,250,0.4)",
-  borderRadius: "14px",
-  color: "white",
-  fontFamily: "'Outfit', sans-serif",
-  fontSize: "15px",
-  fontWeight: "600",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
+function IconBox({ children, success = false }) {
+  return <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: success ? "rgba(52,211,153,0.15)" : "linear-gradient(135deg, rgba(167,139,250,0.3), rgba(96,165,250,0.3))", border: `1px solid ${success ? "rgba(52,211,153,0.3)" : "rgba(167,139,250,0.3)"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>{children}</div>;
+}
+
+const heading = { color: "white", fontSize: "22px", fontWeight: 750, margin: "0 0 8px" };
+const mutedText = { color: "rgba(255,255,255,0.45)", fontSize: "14px", lineHeight: 1.55, margin: 0 };
+const eyebrow = { color: "rgba(255,255,255,0.4)", fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase", margin: "0 0 8px" };
+const btnStyle = { width: "100%", minHeight: "48px", padding: "13px 20px", background: "linear-gradient(135deg, rgba(167,139,250,0.3), rgba(96,165,250,0.3))", border: "1px solid rgba(167,139,250,0.4)", borderRadius: "14px", color: "white", fontSize: "15px", fontWeight: 650, display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" };

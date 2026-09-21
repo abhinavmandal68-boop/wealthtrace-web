@@ -7,6 +7,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const GroupsList = lazy(() => import("./pages/GroupsList"));
 const GroupDetail = lazy(() => import("./pages/GroupDetail"));
 const JoinGroup = lazy(() => import("./pages/JoinGroup"));
+const Planning = lazy(() => import("./pages/Planning"));
 
 function LoadingScreen() {
   return (
@@ -60,6 +61,7 @@ export default function App() {
             <Route path="/"            element={<Dashboard user={user} />} />
             <Route path="/groups"      element={<GroupsList user={user} />} />
             <Route path="/groups/:groupId" element={<GroupDetail user={user} />} />
+            <Route path="/planning" element={<Planning user={user} />} />
             {/* Any unknown URL → go home */}
             <Route path="*" element={<Navigate to="/" />} />
           </>

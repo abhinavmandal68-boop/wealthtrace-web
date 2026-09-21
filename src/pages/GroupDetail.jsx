@@ -57,6 +57,9 @@ export default function GroupDetail({ user }) {
   const [splitAmong, setSplitAmong] = useState([]);
   const [adding, setAdding] = useState(false);
   const [settlingId, setSettlingId] = useState("");
+  const [settlementTarget, setSettlementTarget] = useState(null);
+  const [settlementNote, setSettlementNote] = useState("");
+  const [settlementProofUrl, setSettlementProofUrl] = useState("");
   const [pageError, setPageError] = useState("");
 
   useEffect(() => {
@@ -146,15 +149,20 @@ export default function GroupDetail({ user }) {
     try {
       await addDoc(collection(db, "groupExpenses"), {
         groupId,
-        description: `Settlement: ${getName(balance.from)} paid ${getName(balance.to)}`,
+        description: `Settlement: ${group.memberNames?.[balance.from] || "Member"} paid ${group.memberNames?.[balance.to] || "Member"}`,
         amount: balance.amount,
         paidBy: balance.from,
         splitAmong: [balance.to],
         createdBy: user.uid,
         createdAt: serverTimestamp(),
         type: "settlement",
+        note: settlementNote.trim(),
+        proofUrl: settlementProofUrl.trim(),
         settled: false,
       });
+      setSettlementTarget(null);
+      setSettlementNote("");
+      setSettlementProofUrl("");
     } catch (e) {
       console.error(e);
       setPageError("The settlement couldn't be recorded. Please try again.");
@@ -199,7 +207,10 @@ export default function GroupDetail({ user }) {
         await batch.commit();
       }
       // Then delete the group document itself
-      await deleteDoc(doc(db, "groups", groupId));
+      const finalBatch = writeBatch(db);
+      finalBatch.delete(doc(db, "groups", groupId));
+      if (group.code) finalBatch.delete(doc(db, "inviteCodes", group.code));
+      await finalBatch.commit();
       navigate("/groups");
     } catch (e) {
       console.error(e);
@@ -246,6 +257,12 @@ export default function GroupDetail({ user }) {
   const totalSpent = expenses
     .filter(e => !e.settled && e.type !== "settlement")
     .reduce((sum, e) => sum + e.amount, 0);
+  const currency = group.currency || "INR";
+  const formatMoney = (value) => new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
 
   return (
     <div className="page-shell group-detail-page" style={{
@@ -297,7 +314,7 @@ export default function GroupDetail({ user }) {
               {group.name}
             </h1>
             <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "12px", margin: 0 }}>
-              {group.members?.length || 1} members · ₹{totalSpent.toLocaleString("en-IN")} total
+              {group.members?.length || 1} members · {formatMoney(totalSpent)} total
             </p>
           </div>
           <button
@@ -436,12 +453,14 @@ export default function GroupDetail({ user }) {
                       <p style={{ color: "rgba(255,255,255,0.25)", fontSize: "11px", margin: "4px 0 0" }}>
                         Split among: {expense.splitAmong?.map(uid => getName(uid)).join(", ")}
                       </p>
+                      {expense.note && <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "11px", margin: "5px 0 0" }}>Note: {expense.note}</p>}
+                      {expense.proofUrl && <a href={expense.proofUrl} target="_blank" rel="noreferrer" style={{ color: "#60a5fa", fontSize: "11px", display: "inline-block", marginTop: "5px" }}>View payment proof</a>}
                     </div>
 
                     {/* Right — amount + delete */}
                     <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0, marginLeft: "12px" }}>
                       <p style={{ color: "#a78bfa", fontWeight: "700", fontSize: "16px", margin: 0, whiteSpace: "nowrap" }}>
-                        ₹{expense.amount.toLocaleString("en-IN")}
+                        {formatMoney(expense.amount)}
                       </p>
                       {(group.createdBy === user.uid || expense.createdBy === user.uid) && (
                         <button
@@ -494,12 +513,12 @@ export default function GroupDetail({ user }) {
                       <span style={{ color: "#34d399" }}>{getName(b.to)}</span>
                     </p>
                     <p style={{ color: "#a78bfa", fontWeight: "700", fontSize: "18px", margin: 0 }}>
-                      ₹{b.amount.toLocaleString("en-IN")}
+                      {formatMoney(b.amount)}
                     </p>
                   </div>
                   {b.from === user.uid && (
                   <button
-                    onClick={() => settleUp(b)}
+                    onClick={() => setSettlementTarget(b)}
                     disabled={Boolean(settlingId)}
                     style={{
                       padding: "8px 16px",
@@ -639,11 +658,12 @@ export default function GroupDetail({ user }) {
                 type="text"
                 placeholder="e.g. Dinner at Barbeque Nation"
                 value={desc}
+                maxLength={200}
                 onChange={e => setDesc(e.target.value)}
                 style={inputStyle}
               />
 
-              <p style={labelStyle}>Amount (₹)</p>
+              <p style={labelStyle}>Amount ({currency})</p>
               <input
                 type="number"
                 min="0.01"
@@ -728,6 +748,49 @@ export default function GroupDetail({ user }) {
           </>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {settlementTarget && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSettlementTarget(null)}
+              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", zIndex: 60 }}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              className="mobile-bottom-sheet"
+              style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 61, width: "100%", maxWidth: "480px", margin: "0 auto", padding: "26px 24px 36px", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "28px 28px 0 0", background: "linear-gradient(180deg, #1a1730, #0f0c29)" }}
+            >
+              <h3 style={{ color: "white", margin: "0 0 8px" }}>Record settlement</h3>
+              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "13px", margin: "0 0 20px" }}>{getName(settlementTarget.from)} pays {getName(settlementTarget.to)} {formatMoney(settlementTarget.amount)}</p>
+              <p style={labelStyle}>Note (optional)</p>
+              <input value={settlementNote} onChange={(event) => setSettlementNote(event.target.value)} maxLength={200} placeholder="e.g. Paid by UPI" style={inputStyle} />
+              <p style={labelStyle}>Payment proof URL (optional)</p>
+              <input type="url" value={settlementProofUrl} onChange={(event) => setSettlementProofUrl(event.target.value)} maxLength={500} placeholder="https://..." style={inputStyle} />
+              <div className="form-actions" style={{ display: "flex", gap: "8px" }}>
+                <button onClick={() => settleUp(settlementTarget)} disabled={Boolean(settlingId) || (settlementProofUrl && !/^https?:\/\//i.test(settlementProofUrl))} style={{ ...btnStyle, flex: 1 }}>
+                  {settlingId ? "Recording..." : "Confirm settlement"}
+                </button>
+                <button onClick={() => setSettlementTarget(null)} style={{ ...btnStyle, flex: "0 0 auto", background: "rgba(255,255,255,0.06)" }}>Cancel</button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+const btnStyle = {
+  padding: "13px 16px",
+  border: "1px solid rgba(167,139,250,0.4)",
+  borderRadius: "12px",
+  background: "linear-gradient(135deg, rgba(167,139,250,0.4), rgba(96,165,250,0.4))",
+  color: "white",
+  fontWeight: 650,
+};

@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-  collection, addDoc, query, where,
-  onSnapshot, serverTimestamp, doc, deleteDoc,
-  getDocs, updateDoc, arrayUnion, writeBatch,
+  collection, query, where,
+  onSnapshot, serverTimestamp, doc,
+  getDocs, getDoc, setDoc, updateDoc, arrayUnion, writeBatch,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -31,8 +31,8 @@ const generateCode = () => {
 const generateUniqueCode = async () => {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const code = generateCode();
-    const existing = await getDocs(query(collection(db, "groups"), where("code", "==", code)));
-    if (existing.empty) return code;
+    const existing = await getDoc(doc(db, "inviteCodes", code));
+    if (!existing.exists()) return code;
   }
   throw new Error("Unable to generate a unique group code");
 };
@@ -44,6 +44,7 @@ export default function GroupsList({ user }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [groupName, setGroupName] = useState("");
+  const [groupCurrency, setGroupCurrency] = useState("INR");
   const [joinCode, setJoinCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -75,6 +76,30 @@ export default function GroupsList({ user }) {
     return () => unsub();
   }, [user]);
 
+  // Lazily backfill secure invite documents for groups created before inviteCodes existed.
+  useEffect(() => {
+    groups
+      .filter((group) => group.createdBy === user.uid && group.code)
+      .forEach(async (group) => {
+        try {
+          const inviteRef = doc(db, "inviteCodes", group.code);
+          const inviteSnap = await getDoc(inviteRef);
+          if (!inviteSnap.exists()) {
+            await setDoc(inviteRef, {
+              groupId: group.id,
+              groupName: group.name,
+              createdBy: user.uid,
+              currency: group.currency || "INR",
+              active: true,
+              createdAt: group.createdAt || serverTimestamp(),
+            });
+          }
+        } catch (error) {
+          console.error("Invite migration failed", error);
+        }
+      });
+  }, [groups, user.uid]);
+
   // ── Create group with a unique code ──
   const createGroup = async () => {
     if (!groupName.trim()) return;
@@ -82,17 +107,31 @@ export default function GroupsList({ user }) {
     setPageError("");
     try {
       const code = await generateUniqueCode();
-      const docRef = await addDoc(collection(db, "groups"), {
+      const memberName = (user.displayName || "Member").trim().slice(0, 80) || "Member";
+      const groupRef = doc(collection(db, "groups"));
+      const batch = writeBatch(db);
+      batch.set(groupRef, {
         name: groupName.trim(),
         createdBy: user.uid,
         members: [user.uid],
-        memberNames: { [user.uid]: user.displayName || user.email },
+        memberNames: { [user.uid]: memberName },
         code,
+        currency: groupCurrency,
         createdAt: serverTimestamp(),
       });
+      batch.set(doc(db, "inviteCodes", code), {
+        groupId: groupRef.id,
+        groupName: groupName.trim(),
+        createdBy: user.uid,
+        currency: groupCurrency,
+        active: true,
+        createdAt: serverTimestamp(),
+      });
+      await batch.commit();
       setGroupName("");
+      setGroupCurrency("INR");
       setShowCreate(false);
-      navigate(`/groups/${docRef.id}`);
+      navigate(`/groups/${groupRef.id}`);
     } catch (e) {
       console.error(e);
       setPageError("The group couldn't be created. Please try again.");
@@ -108,36 +147,25 @@ export default function GroupsList({ user }) {
     setJoining(true);
     setJoinError("");
     try {
-      // Search for group with this code
-      const q = query(collection(db, "groups"), where("code", "==", code));
-      const snap = await getDocs(q);
+      const memberName = (user.displayName || "Member").trim().slice(0, 80) || "Member";
+      const inviteSnap = await getDoc(doc(db, "inviteCodes", code));
 
-      if (snap.empty) {
+      if (!inviteSnap.exists() || inviteSnap.data().active !== true) {
         setJoinError("No group found with this code");
         setJoining(false);
         return;
       }
-
-      const groupDoc = snap.docs[0];
-      const groupData = groupDoc.data();
-
-      // Already a member?
-      if (groupData.members?.includes(user.uid)) {
-        setJoinCode("");
-        setShowJoin(false);
-        navigate(`/groups/${groupDoc.id}`);
-        return;
-      }
+      const groupId = inviteSnap.data().groupId;
 
       // Add user to members
-      await updateDoc(doc(db, "groups", groupDoc.id), {
+      await updateDoc(doc(db, "groups", groupId), {
         members: arrayUnion(user.uid),
-        [`memberNames.${user.uid}`]: user.displayName || user.email,
+        [`memberNames.${user.uid}`]: memberName,
       });
 
       setJoinCode("");
       setShowJoin(false);
-      navigate(`/groups/${groupDoc.id}`);
+      navigate(`/groups/${groupId}`);
     } catch (e) {
       console.error(e);
       setJoinError("Something went wrong. Try again.");
@@ -170,7 +198,11 @@ export default function GroupsList({ user }) {
         expensesSnap.docs.slice(i, i + 450).forEach((expenseDoc) => batch.delete(expenseDoc.ref));
         await batch.commit();
       }
-      await deleteDoc(doc(db, "groups", groupId));
+      const group = groups.find((item) => item.id === groupId);
+      const finalBatch = writeBatch(db);
+      finalBatch.delete(doc(db, "groups", groupId));
+      if (group?.code) finalBatch.delete(doc(db, "inviteCodes", group.code));
+      await finalBatch.commit();
     } catch (e) {
       console.error(e);
       setPageError("The group couldn't be deleted. Only the group owner can delete it.");
@@ -230,10 +262,19 @@ export default function GroupsList({ user }) {
                 type="text"
                 placeholder="Group name (e.g. Goa Trip)"
                 value={groupName}
+                maxLength={80}
                 onChange={(e) => setGroupName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && createGroup()}
                 style={{ width: "100%", padding: "12px 16px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "12px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "15px", outline: "none", boxSizing: "border-box", marginBottom: "12px" }}
               />
+              <select
+                aria-label="Group currency"
+                value={groupCurrency}
+                onChange={(event) => setGroupCurrency(event.target.value)}
+                style={{ width: "100%", padding: "12px 16px", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "12px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "15px", outline: "none", boxSizing: "border-box", marginBottom: "12px" }}
+              >
+                {[["INR", "Indian Rupee"], ["USD", "US Dollar"], ["EUR", "Euro"], ["GBP", "British Pound"], ["AED", "UAE Dirham"]].map(([value, label]) => <option key={value} value={value} style={{ background: "#302b63" }}>{value} — {label}</option>)}
+              </select>
               <div className="form-actions" style={{ display: "flex", gap: "8px" }}>
                 <button
                   onClick={createGroup}
@@ -243,7 +284,7 @@ export default function GroupsList({ user }) {
                   {creating ? "Creating..." : "Create Group"}
                 </button>
                 <button
-                  onClick={() => { setShowCreate(false); setGroupName(""); }}
+                  onClick={() => { setShowCreate(false); setGroupName(""); setGroupCurrency("INR"); }}
                   style={{ padding: "12px 20px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", borderRadius: "12px", color: "rgba(255,255,255,0.5)", fontFamily: "'Outfit',sans-serif", fontSize: "14px", cursor: "pointer" }}
                 >
                   Cancel
@@ -347,6 +388,7 @@ export default function GroupsList({ user }) {
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                       <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "12px", margin: 0 }}>
                         {group.members?.length || 1} member{group.members?.length !== 1 ? "s" : ""}
+                        {group.currency ? ` · ${group.currency}` : " · INR"}
                       </p>
                       {group.code && (
                         <span style={{ padding: "2px 8px", background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.2)", borderRadius: "6px", fontSize: "11px", color: "rgba(167,139,250,0.8)", fontWeight: "700", letterSpacing: "0.1em" }}>

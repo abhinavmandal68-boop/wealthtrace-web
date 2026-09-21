@@ -7,11 +7,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-          'animation-vendor': ['framer-motion'],
-          'charts-vendor': ['recharts'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/firebase/') || id.includes('/@firebase/')) return 'firebase-vendor'
+          if (id.includes('/framer-motion/') || id.includes('/motion-dom/') || id.includes('/motion-utils/')) return 'animation-vendor'
+          if (id.includes('/recharts/') || id.includes('/d3-')) return 'charts-vendor'
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/react-router')) return 'react-vendor'
+          return undefined
         },
       },
     },
