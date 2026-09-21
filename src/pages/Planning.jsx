@@ -140,6 +140,24 @@ export default function Planning({ user }) {
     const dueDate = item.nextDueAt?.toDate?.();
     return item.active !== false && dueDate && dueDate <= new Date(`${todayInputValue()}T23:59:59`);
   });
+  const dueRecurringCount = dueRecurring.length;
+  const exceededBudgetCount = exceededBudgets.length;
+  const alertBody = [
+    dueRecurringCount ? `${dueRecurringCount} recurring item(s) are due` : "",
+    exceededBudgetCount ? `${exceededBudgetCount} budget(s) are exceeded` : "",
+  ].filter(Boolean).join(" and ");
+
+  useEffect(() => {
+    if (!(dueRecurringCount || exceededBudgetCount) || !("Notification" in window) || Notification.permission !== "granted") return;
+    const alertKey = `wealthtrace-alert-${user.uid}-${todayInputValue()}`;
+    try {
+      if (window.localStorage.getItem(alertKey)) return;
+      new Notification("WealthTrace needs your attention", { body: `${alertBody}.`, icon: "/favicon.svg" });
+      window.localStorage.setItem(alertKey, "shown");
+    } catch (error) {
+      console.error("Notification could not be shown", error);
+    }
+  }, [alertBody, dueRecurringCount, exceededBudgetCount, user.uid]);
 
   const saveBudget = async () => {
     const limit = Number(budgetLimit);
@@ -234,11 +252,8 @@ export default function Planning({ user }) {
     }
     const permission = await Notification.requestPermission();
     if (permission === "granted") {
-      const alertParts = [];
-      if (dueRecurring.length) alertParts.push(`${dueRecurring.length} recurring item(s) are due`);
-      if (exceededBudgets.length) alertParts.push(`${exceededBudgets.length} budget(s) are exceeded`);
       new Notification("WealthTrace alerts enabled", {
-        body: alertParts.length ? `${alertParts.join(" and ")}.` : "No recurring items are due and your budgets are on track.",
+        body: alertBody ? `${alertBody}.` : "No recurring items are due and your budgets are on track.",
         icon: "/favicon.svg",
       });
     }
