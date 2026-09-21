@@ -28,6 +28,15 @@ const generateCode = () => {
   return code;
 };
 
+const generateUniqueCode = async () => {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = generateCode();
+    const existing = await getDocs(query(collection(db, "groups"), where("code", "==", code)));
+    if (existing.empty) return code;
+  }
+  throw new Error("Unable to generate a unique group code");
+};
+
 export default function GroupsList({ user }) {
   const navigate = useNavigate();
 
@@ -72,7 +81,7 @@ export default function GroupsList({ user }) {
     setCreating(true);
     setPageError("");
     try {
-      const code = generateCode();
+      const code = await generateUniqueCode();
       const docRef = await addDoc(collection(db, "groups"), {
         name: groupName.trim(),
         createdBy: user.uid,
@@ -175,8 +184,6 @@ export default function GroupsList({ user }) {
       fontFamily: "'Outfit', sans-serif",
       padding: "24px 16px",
     }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');`}</style>
-
       <div className="mobile-content groups-content" style={{ maxWidth: "480px", margin: "0 auto" }}>
 
         {pageError && (
@@ -265,9 +272,14 @@ export default function GroupsList({ user }) {
                 type="text"
                 placeholder="e.g. GOA4821"
                 value={joinCode}
-                onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setJoinError(""); }}
+                onChange={(e) => {
+                  setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ""));
+                  setJoinError("");
+                }}
                 onKeyDown={(e) => e.key === "Enter" && joinGroup()}
                 maxLength={7}
+                autoComplete="off"
+                spellCheck="false"
                 style={{ width: "100%", padding: "12px 16px", background: "rgba(255,255,255,0.08)", border: joinError ? "1px solid rgba(248,113,113,0.5)" : "1px solid rgba(255,255,255,0.15)", borderRadius: "12px", color: "white", fontFamily: "'Outfit',sans-serif", fontSize: "18px", fontWeight: "700", letterSpacing: "0.15em", outline: "none", boxSizing: "border-box", marginBottom: "8px", textTransform: "uppercase" }}
               />
               {joinError && (
@@ -345,13 +357,13 @@ export default function GroupsList({ user }) {
                   </div>
 
                   {/* Copy code button */}
-                  <button
+                  {group.code && <button
                     onClick={(e) => { e.stopPropagation(); copyCode(group.code, group.id); }}
                     style={{ background: copiedId === group.id ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.06)", border: copiedId === group.id ? "1px solid rgba(52,211,153,0.3)" : "1px solid rgba(255,255,255,0.10)", borderRadius: "10px", padding: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: copiedId === group.id ? "#34d399" : "rgba(255,255,255,0.4)", transition: "all 0.2s ease", flexShrink: 0 }}
                     title="Copy group code"
                   >
                     {copiedId === group.id ? <Check size={16} /> : <Hash size={16} />}
-                  </button>
+                  </button>}
 
                   {/* Delete button */}
                   {group.createdBy === user.uid && (

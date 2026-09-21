@@ -56,6 +56,7 @@ export default function GroupDetail({ user }) {
   const [paidBy, setPaidBy] = useState(user?.uid || "");
   const [splitAmong, setSplitAmong] = useState([]);
   const [adding, setAdding] = useState(false);
+  const [settlingId, setSettlingId] = useState("");
   const [pageError, setPageError] = useState("");
 
   useEffect(() => {
@@ -106,7 +107,7 @@ export default function GroupDetail({ user }) {
 
   const addExpense = async () => {
     const val = Number(amount);
-    if (!desc.trim() || !val || val <= 0 || splitAmong.length === 0) return;
+    if (!desc.trim() || !Number.isFinite(val) || val <= 0 || splitAmong.length === 0) return;
     setAdding(true);
     try {
       await addDoc(collection(db, "groupExpenses"), {
@@ -139,6 +140,9 @@ export default function GroupDetail({ user }) {
 
   const settleUp = async (balance) => {
     if (!balance || balance.amount <= 0) return;
+    const settlementId = `${balance.from}-${balance.to}`;
+    if (settlingId) return;
+    setSettlingId(settlementId);
     try {
       await addDoc(collection(db, "groupExpenses"), {
         groupId,
@@ -154,6 +158,8 @@ export default function GroupDetail({ user }) {
     } catch (e) {
       console.error(e);
       setPageError("The settlement couldn't be recorded. Please try again.");
+    } finally {
+      setSettlingId("");
     }
   };
 
@@ -249,8 +255,7 @@ export default function GroupDetail({ user }) {
       padding: "24px 16px 120px",
     }}>
       <style>
-        {`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
-        .del-expense-btn { background: none; border: none; color: rgba(255,255,255,0.15); cursor: pointer; padding: 6px; border-radius: 8px; display: flex; align-items: center; transition: all 0.2s; }
+        {`.del-expense-btn { background: none; border: none; color: rgba(255,255,255,0.15); cursor: pointer; padding: 6px; border-radius: 8px; display: flex; align-items: center; transition: all 0.2s; }
         .del-expense-btn:hover { color: #f87171; background: rgba(248,113,113,0.10); }
         .clear-all-btn { background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.2); color: rgba(239,68,68,0.7); border-radius: 10px; padding: 7px 14px; font-family: 'Outfit',sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s; }
         .clear-all-btn:hover { background: rgba(239,68,68,0.2); color: #f87171; }`}
@@ -495,6 +500,7 @@ export default function GroupDetail({ user }) {
                   {b.from === user.uid && (
                   <button
                     onClick={() => settleUp(b)}
+                    disabled={Boolean(settlingId)}
                     style={{
                       padding: "8px 16px",
                       background: "rgba(52,211,153,0.12)",
@@ -507,7 +513,7 @@ export default function GroupDetail({ user }) {
                       cursor: "pointer",
                     }}
                   >
-                    Settle up
+                    {settlingId === `${b.from}-${b.to}` ? "Recording..." : "Settle up"}
                   </button>
                   )}
                 </motion.div>

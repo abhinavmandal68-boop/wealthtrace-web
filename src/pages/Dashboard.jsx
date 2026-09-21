@@ -84,22 +84,21 @@ const glassCard = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getLongPressHandlers(callback, ms = 500) {
-  const timerRef = { current: null };
+  let timerId = null;
 
   const start = () => {
-    timerRef.current = setTimeout(callback, ms);
+    timerId = window.setTimeout(callback, ms);
   };
 
   const stop = () => {
-    clearTimeout(timerRef.current);
+    window.clearTimeout(timerId);
   };
 
   return {
-    onMouseDown: start,
-    onMouseUp: stop,
-    onMouseLeave: stop,
-    onTouchStart: start,
-    onTouchEnd: stop,
+    onPointerDown: start,
+    onPointerUp: stop,
+    onPointerLeave: stop,
+    onPointerCancel: stop,
   };
 }
 
@@ -188,7 +187,7 @@ export default function Dashboard({ user }) {
   const addTransaction = async () => {
     const val = Number(amount);
 
-    if (!val || isNaN(val) || val <= 0) return;
+    if (!Number.isFinite(val) || val <= 0) return;
 
     const chosenDate = new Date(txnDate + "T12:00:00");
 
@@ -907,8 +906,6 @@ export default function Dashboard({ user }) {
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
-
         * {
           box-sizing: border-box;
         }

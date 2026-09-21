@@ -95,8 +95,6 @@ export default function JoinGroup({ user }) {
       display: "flex", alignItems: "center", justifyContent: "center",
       padding: "24px",
     }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');`}</style>
-
       <motion.div
         className="join-card"
         initial={{ opacity: 0, y: 24, scale: 0.97 }}
