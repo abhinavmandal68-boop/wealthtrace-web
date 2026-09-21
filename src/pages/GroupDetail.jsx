@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { db, auth } from "../firebase";
+import { db } from "../firebase";
 import {
  doc, getDoc, collection, addDoc, onSnapshot,
-  query, where, serverTimestamp, updateDoc, deleteDoc, writeBatch,
+  query, where, serverTimestamp, deleteDoc, writeBatch,
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Plus, Users, Receipt, TrendingDown, X, Check, Trash2 } from "lucide-react";
@@ -41,10 +41,9 @@ const inputStyle = {
   marginBottom: "20px",
 };
 
-export default function GroupDetail() {
+export default function GroupDetail({ user }) {
   const { groupId } = useParams();
   const navigate = useNavigate();
-  const user = auth.currentUser;
 
   const [group, setGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
@@ -57,28 +56,45 @@ export default function GroupDetail() {
   const [paidBy, setPaidBy] = useState(user?.uid || "");
   const [splitAmong, setSplitAmong] = useState([]);
   const [adding, setAdding] = useState(false);
+  const [pageError, setPageError] = useState("");
 
   useEffect(() => {
     const fetchGroup = async () => {
-      const snap = await getDoc(doc(db, "groups", groupId));
-      if (!snap.exists()) { navigate("/groups"); return; }
-      const data = { id: snap.id, ...snap.data() };
-      setGroup(data);
-      setSplitAmong(data.members || []);
+      try {
+        const snap = await getDoc(doc(db, "groups", groupId));
+        if (!snap.exists()) { navigate("/groups", { replace: true }); return; }
+        const data = { id: snap.id, ...snap.data() };
+        if (!data.members?.includes(user.uid)) {
+          navigate(`/join/${groupId}`, { replace: true });
+          return;
+        }
+        setGroup(data);
+        setSplitAmong(data.members || []);
+      } catch (error) {
+        console.error(error);
+        setPageError("We couldn't load this group. Check your connection or access.");
+      }
     };
     fetchGroup();
-  }, [groupId, navigate]);
+  }, [groupId, navigate, user.uid]);
 
   useEffect(() => {
     const q = query(
       collection(db, "groupExpenses"),
       where("groupId", "==", groupId)
     );
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setExpenses(data);
-    });
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        setExpenses(data);
+      },
+      (error) => {
+        console.error(error);
+        setPageError("We couldn't load this group's expenses.");
+      }
+    );
     return () => unsub();
   }, [groupId]);
 
@@ -107,8 +123,12 @@ export default function GroupDetail() {
       setAmount("");
       setSplitAmong(group?.members || []);
       setShowAdd(false);
-    } catch (e) { console.error(e); }
-    setAdding(false);
+    } catch (e) {
+      console.error(e);
+      setPageError("The expense couldn't be added. Please try again.");
+    } finally {
+      setAdding(false);
+    }
   };
 
   const toggleMember = (uid) => {
@@ -117,29 +137,49 @@ export default function GroupDetail() {
     );
   };
 
-  const settleUp = async (expenseIds) => {
+  const settleUp = async (balance) => {
+    if (!balance || balance.amount <= 0) return;
     try {
-      await Promise.all(
-        expenseIds.map(id =>
-          updateDoc(doc(db, "groupExpenses", id), { settled: true })
-        )
-      );
-    } catch (e) { console.error(e); }
+      await addDoc(collection(db, "groupExpenses"), {
+        groupId,
+        description: `Settlement: ${getName(balance.from)} paid ${getName(balance.to)}`,
+        amount: balance.amount,
+        paidBy: balance.from,
+        splitAmong: [balance.to],
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+        type: "settlement",
+        settled: false,
+      });
+    } catch (e) {
+      console.error(e);
+      setPageError("The settlement couldn't be recorded. Please try again.");
+    }
   };
 
   // ── Delete single expense ──
   const deleteExpense = async (id) => {
     try {
       await deleteDoc(doc(db, "groupExpenses", id));
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setPageError("The expense couldn't be deleted.");
+    }
   };
 
   // ── Clear all expenses ──
   const clearAllExpenses = async () => {
     if (!window.confirm("Clear ALL expenses in this group? This cannot be undone.")) return;
     try {
-      await Promise.all(expenses.map(e => deleteDoc(doc(db, "groupExpenses", e.id))));
-    } catch (e) { console.error(e); }
+      for (let i = 0; i < expenses.length; i += 450) {
+        const batch = writeBatch(db);
+        expenses.slice(i, i + 450).forEach((expense) => batch.delete(doc(db, "groupExpenses", expense.id)));
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error(e);
+      setPageError("The expenses couldn't be cleared.");
+    }
   };
 
   // ── Delete entire group ──
@@ -147,11 +187,18 @@ export default function GroupDetail() {
     if (!window.confirm(`Delete "${group.name}"? This will remove the group and ALL its expenses permanently.`)) return;
     try {
       // Delete all expenses first
-      await Promise.all(expenses.map(e => deleteDoc(doc(db, "groupExpenses", e.id))));
+      for (let i = 0; i < expenses.length; i += 450) {
+        const batch = writeBatch(db);
+        expenses.slice(i, i + 450).forEach((expense) => batch.delete(doc(db, "groupExpenses", expense.id)));
+        await batch.commit();
+      }
       // Then delete the group document itself
       await deleteDoc(doc(db, "groups", groupId));
       navigate("/groups");
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setPageError("The group couldn't be deleted.");
+    }
   };
   const getName = (uid) => {
     if (!group?.memberNames) return "Unknown";
@@ -176,15 +223,22 @@ export default function GroupDetail() {
         alignItems: "center",
         justifyContent: "center",
       }}>
-        <p style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'Outfit',sans-serif" }}>
-          Loading...
-        </p>
+        {pageError ? (
+          <div style={{ textAlign: "center", padding: "24px" }} role="alert">
+            <p style={{ color: "#fca5a5", fontFamily: "'Outfit',sans-serif", marginBottom: "16px" }}>{pageError}</p>
+            <button className="ghost-btn" onClick={() => navigate("/groups")}>Back to groups</button>
+          </div>
+        ) : (
+          <p style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'Outfit',sans-serif" }} role="status">
+            Loading group...
+          </p>
+        )}
       </div>
     );
   }
 
   const totalSpent = expenses
-    .filter(e => !e.settled)
+    .filter(e => !e.settled && e.type !== "settlement")
     .reduce((sum, e) => sum + e.amount, 0);
 
   return (
@@ -204,8 +258,15 @@ export default function GroupDetail() {
 
       <div className="mobile-content group-detail-content" style={{ maxWidth: "480px", margin: "0 auto" }}>
 
+        {pageError && (
+          <div className="inline-error" role="alert">
+            <span>{pageError}</span>
+            <button onClick={() => setPageError("")} aria-label="Dismiss error">×</button>
+          </div>
+        )}
+
         {/* Header */}
-        <div style={{
+        <div className="group-header" style={{
           display: "flex",
           alignItems: "center",
           gap: "12px",
@@ -213,6 +274,7 @@ export default function GroupDetail() {
         }}>
           <button
             onClick={() => navigate("/groups")}
+            aria-label="Back to groups"
             style={{
               background: "rgba(255,255,255,0.08)",
               border: "1px solid rgba(255,255,255,0.12)",
@@ -328,7 +390,7 @@ export default function GroupDetail() {
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
 
             {/* Clear all button — only shows when there are expenses */}
-            {expenses.length > 0 && (
+            {expenses.length > 0 && group.createdBy === user.uid && (
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="clear-all-btn" onClick={clearAllExpenses}>
                   <Trash2 size={13} /> Clear all
@@ -345,6 +407,7 @@ export default function GroupDetail() {
             ) : (
               expenses.map(expense => (
                 <motion.div
+                  className="group-expense-card"
                   key={expense.id}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -375,13 +438,16 @@ export default function GroupDetail() {
                       <p style={{ color: "#a78bfa", fontWeight: "700", fontSize: "16px", margin: 0, whiteSpace: "nowrap" }}>
                         ₹{expense.amount.toLocaleString("en-IN")}
                       </p>
-                      <button
-                        className="del-expense-btn"
-                        onClick={() => deleteExpense(expense.id)}
-                        title="Delete expense"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {(group.createdBy === user.uid || expense.createdBy === user.uid) && (
+                        <button
+                          className="del-expense-btn"
+                          onClick={() => deleteExpense(expense.id)}
+                          title="Delete expense"
+                          aria-label={`Delete ${expense.description}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -404,6 +470,7 @@ export default function GroupDetail() {
             ) : (
               balances.map((b, i) => (
                 <motion.div
+                  className="group-balance-card"
                   key={i}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -425,12 +492,9 @@ export default function GroupDetail() {
                       ₹{b.amount.toLocaleString("en-IN")}
                     </p>
                   </div>
+                  {b.from === user.uid && (
                   <button
-                    onClick={() => settleUp(
-                      expenses
-                        .filter(e => !e.settled && e.splitAmong?.includes(b.from) && e.paidBy === b.to)
-                        .map(e => e.id)
-                    )}
+                    onClick={() => settleUp(b)}
                     style={{
                       padding: "8px 16px",
                       background: "rgba(52,211,153,0.12)",
@@ -445,6 +509,7 @@ export default function GroupDetail() {
                   >
                     Settle up
                   </button>
+                  )}
                 </motion.div>
               ))
             )}
@@ -452,7 +517,7 @@ export default function GroupDetail() {
         )}
 
       {/* ── Danger Zone ── */}
-        <div style={{
+        {group.createdBy === user.uid && <div className="danger-zone" style={{
           marginTop: "32px",
           padding: "20px",
           background: "rgba(239,68,68,0.05)",
@@ -502,7 +567,7 @@ export default function GroupDetail() {
               <Trash2 size={13} /> Delete Group
             </button>
           </div>
-        </div>
+        </div>}
 
       </div>
 
@@ -575,6 +640,9 @@ export default function GroupDetail() {
               <p style={labelStyle}>Amount (₹)</p>
               <input
                 type="number"
+                min="0.01"
+                step="0.01"
+                inputMode="decimal"
                 placeholder="0"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}

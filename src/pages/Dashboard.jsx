@@ -10,6 +10,7 @@ import {
   deleteDoc,
   doc,
   writeBatch,
+  Timestamp,
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { motion, AnimatePresence } from "framer-motion";
@@ -82,7 +83,7 @@ const glassCard = {
 // Long press
 // ─────────────────────────────────────────────────────────────────────────────
 
-function useLongPress(callback, ms = 500) {
+function getLongPressHandlers(callback, ms = 500) {
   const timerRef = { current: null };
 
   const start = () => {
@@ -106,12 +107,17 @@ function useLongPress(callback, ms = 500) {
 // Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function Dashboard() {
-  const user = auth.currentUser;
+export default function Dashboard({ user }) {
   const navigate = useNavigate();
 
   // Form state
-  const todayStr = new Date().toISOString().split("T")[0];
+  const toLocalDateInputValue = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+  const todayStr = toLocalDateInputValue(new Date());
 
   const [amount, setAmount] = useState("");
   const [type, setType] = useState("expense");
@@ -135,6 +141,7 @@ export default function Dashboard() {
   const [importBank, setImportBank] = useState("");
   const [importCount, setImportCount] = useState(0);
   const [importErrors, setImportErrors] = useState([]);
+  const [pageError, setPageError] = useState("");
 
   // ───────────────────────────────────────────────────────────────────────────
   // Firestore listener
@@ -148,20 +155,28 @@ export default function Dashboard() {
       where("userId", "==", user.uid)
     );
 
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map((d) => ({
-        ...d.data(),
-        id: d.id,
-      }));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const data = snap.docs.map((d) => ({
+          ...d.data(),
+          id: d.id,
+        }));
 
-      setTransactions(
-        data.sort(
-          (a, b) =>
-            (b.createdAt?.seconds || 0) -
-            (a.createdAt?.seconds || 0)
-        )
-      );
-    });
+        setTransactions(
+          data.sort(
+            (a, b) =>
+              (b.createdAt?.seconds || 0) -
+              (a.createdAt?.seconds || 0)
+          )
+        );
+        setPageError("");
+      },
+      (error) => {
+        console.error(error);
+        setPageError("We couldn't sync your transactions. Check your connection and try again.");
+      }
+    );
 
     return () => unsub();
   }, [user]);
@@ -177,18 +192,21 @@ export default function Dashboard() {
 
     const chosenDate = new Date(txnDate + "T12:00:00");
 
-    await addDoc(collection(db, "transactions"), {
-      amount: val,
-      type,
-      category,
-      desc,
-      userId: user.uid,
-      createdAt: {
-        seconds: Math.floor(chosenDate.getTime() / 1000),
-        nanoseconds: 0,
-      },
-      bankDate: txnDate,
-    });
+    try {
+      await addDoc(collection(db, "transactions"), {
+        amount: val,
+        type,
+        category,
+        desc: desc.trim(),
+        userId: user.uid,
+        createdAt: Timestamp.fromDate(chosenDate),
+        bankDate: txnDate,
+      });
+    } catch (error) {
+      console.error(error);
+      setPageError("The transaction couldn't be saved. Please try again.");
+      return;
+    }
 
     setAmount("");
     setDesc("");
@@ -212,7 +230,7 @@ export default function Dashboard() {
     const s = raw.trim().replace(/"/g, "");
 
     const dmy = s.match(
-      /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/
+      /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/
     );
 
     if (dmy) {
@@ -220,7 +238,7 @@ export default function Dashboard() {
     }
 
     const dmyS = s.match(
-      /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/
+      /^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/
     );
 
     if (dmyS) {
@@ -416,6 +434,12 @@ export default function Dashboard() {
 
     e.target.value = "";
 
+    if (file.size > 5 * 1024 * 1024) {
+      setImportStatus("error");
+      setImportErrors(["The CSV is larger than 5 MB. Split it into smaller files and try again."]);
+      return;
+    }
+
     setImportStatus("loading");
     setImportErrors([]);
     setImportBank("");
@@ -505,9 +529,7 @@ export default function Dashboard() {
         ];
 
         const errors = [];
-        const batch = writeBatch(db);
-
-        let count = 0;
+        const records = [];
 
         lines.slice(headerIdx + 1).forEach((line, idx) => {
           if (!line) return;
@@ -604,30 +626,27 @@ export default function Dashboard() {
             collection(db, "transactions")
           );
 
-          batch.set(ref, {
+          records.push({ ref, data: {
             amount: finalAmount,
             type: transType,
             category: detectCategory(rawDesc),
             desc: rawDesc,
             userId: user.uid,
-            createdAt: {
-              seconds: Math.floor(
-                txnDateParsed.getTime() / 1000
-              ),
-              nanoseconds: 0,
-            },
+            createdAt: Timestamp.fromDate(txnDateParsed),
             bankDate: rawDate,
             bank,
             imported: true,
-          });
-
-          count++;
+          }});
         });
 
-        if (count > 0) {
-          await batch.commit();
+        if (records.length > 0) {
+          for (let i = 0; i < records.length; i += 450) {
+            const batch = writeBatch(db);
+            records.slice(i, i + 450).forEach(({ ref, data }) => batch.set(ref, data));
+            await batch.commit();
+          }
 
-          setImportCount(count);
+          setImportCount(records.length);
           setImportStatus("success");
           setImportErrors(errors);
         } else {
@@ -648,6 +667,11 @@ export default function Dashboard() {
       }
     };
 
+    reader.onerror = () => {
+      setImportStatus("error");
+      setImportErrors(["The selected file could not be read."]);
+    };
+
     reader.readAsText(file);
   };
 
@@ -656,9 +680,12 @@ export default function Dashboard() {
   // ───────────────────────────────────────────────────────────────────────────
 
   const deleteOne = async (id) => {
-    await deleteDoc(
-      doc(db, "transactions", id)
-    );
+    try {
+      await deleteDoc(doc(db, "transactions", id));
+    } catch (error) {
+      console.error(error);
+      setPageError("The transaction couldn't be deleted.");
+    }
   };
 
   const deleteAll = async () => {
@@ -669,15 +696,18 @@ export default function Dashboard() {
     )
       return;
 
-    const batch = writeBatch(db);
-
-    transactions.forEach((t) =>
-      batch.delete(
-        doc(db, "transactions", t.id)
-      )
-    );
-
-    await batch.commit();
+    try {
+      for (let i = 0; i < transactions.length; i += 450) {
+        const batch = writeBatch(db);
+        transactions.slice(i, i + 450).forEach((transaction) => {
+          batch.delete(doc(db, "transactions", transaction.id));
+        });
+        await batch.commit();
+      }
+    } catch (error) {
+      console.error(error);
+      setPageError("The transactions couldn't be cleared.");
+    }
   };
 
   const toggleSelect = (id) =>
@@ -702,15 +732,20 @@ export default function Dashboard() {
   const deleteSelected = async () => {
     if (!selectedIds.size) return;
 
-    const batch = writeBatch(db);
-
-    selectedIds.forEach((id) =>
-      batch.delete(
-        doc(db, "transactions", id)
-      )
-    );
-
-    await batch.commit();
+    try {
+      const ids = [...selectedIds];
+      for (let i = 0; i < ids.length; i += 450) {
+        const batch = writeBatch(db);
+        ids.slice(i, i + 450).forEach((id) => {
+          batch.delete(doc(db, "transactions", id));
+        });
+        await batch.commit();
+      }
+    } catch (error) {
+      console.error(error);
+      setPageError("The selected transactions couldn't be deleted.");
+      return;
+    }
 
     setSelectedIds(new Set());
     setSelectMode(false);
@@ -720,20 +755,20 @@ export default function Dashboard() {
   // Derived data
   // ───────────────────────────────────────────────────────────────────────────
 
-  const months = [
-    "All",
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
+  const monthOptions = [
+    { value: "All", label: "All time" },
+    ...Array.from(
+      new Map(
+        transactions
+          .filter((transaction) => transaction.createdAt?.seconds)
+          .sort((a, b) => b.createdAt.seconds - a.createdAt.seconds)
+          .map((transaction) => {
+            const date = new Date(transaction.createdAt.seconds * 1000);
+            const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+            return [value, { value, label: date.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) }];
+          })
+      ).values()
+    ),
   ];
 
   const filtered =
@@ -743,13 +778,8 @@ export default function Dashboard() {
           if (!t.createdAt?.seconds)
             return false;
 
-          return (
-            new Date(
-              t.createdAt.seconds * 1000
-            ).toLocaleString("default", {
-              month: "long",
-            }) === filterMonth
-          );
+          const date = new Date(t.createdAt.seconds * 1000);
+          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}` === filterMonth;
         });
 
   const totalIncome = filtered
@@ -1409,7 +1439,7 @@ export default function Dashboard() {
 
           {[
             ["dashboard", "Dashboard"],
-            ["add", "New Transaction"],
+            ["add", "Add"],
             ["history", "History"],
           ].map(([key, label]) => (
             <button
@@ -1445,6 +1475,13 @@ export default function Dashboard() {
           padding: "0 32px 64px",
         }}
       >
+
+        {pageError && (
+          <div className="inline-error" role="alert">
+            <span>{pageError}</span>
+            <button onClick={() => setPageError("")} aria-label="Dismiss error">×</button>
+          </div>
+        )}
 
         {/* ═══════════════════════════════════════════════════════════════════
             DASHBOARD TAB
@@ -1485,7 +1522,7 @@ export default function Dashboard() {
                 {filtered.length} transaction
                 {filtered.length !== 1 ? "s" : ""}{" "}
                 {filterMonth !== "All"
-                  ? `in ${filterMonth}`
+                  ? `in ${monthOptions.find((option) => option.value === filterMonth)?.label || filterMonth}`
                   : "total"}
               </p>
 
@@ -1510,15 +1547,15 @@ export default function Dashboard() {
                     "'Outfit',sans-serif",
                 }}
               >
-                {months.map((m) => (
+                {monthOptions.map((option) => (
                   <option
-                    key={m}
-                    value={m}
+                    key={option.value}
+                    value={option.value}
                     style={{
                       background: "#302b63",
                     }}
                   >
-                    {m}
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -1638,6 +1675,7 @@ export default function Dashboard() {
 
                 {/* Bar chart */}
                 <div
+                  className="dashboard-chart-card"
                   style={{
                     ...glassCard,
                     padding: "28px",
@@ -1814,6 +1852,7 @@ export default function Dashboard() {
 
                 {/* Pie chart */}
                 <div
+                  className="dashboard-chart-card"
                   style={{
                     ...glassCard,
                     padding: "28px",
@@ -1837,6 +1876,7 @@ export default function Dashboard() {
 
                   {pieData.length > 0 ? (
                     <div
+                      className="dashboard-pie-content"
                       style={{
                         display: "flex",
                         gap: "16px",
@@ -1988,6 +2028,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div
+                className="dashboard-recent-card"
                 style={{
                   ...glassCard,
                   padding: "48px",
@@ -3092,7 +3133,7 @@ export default function Dashboard() {
                               t.id
                             )
                           }
-                          {...useLongPress(
+                          {...getLongPressHandlers(
                             () => {
                               setSelectMode(
                                 true
@@ -3366,6 +3407,7 @@ export default function Dashboard() {
                 selectedIds.size >
                   0 && (
                   <motion.div
+                    className="selection-bar"
                     initial={{
                       opacity: 0,
                       y: 40,

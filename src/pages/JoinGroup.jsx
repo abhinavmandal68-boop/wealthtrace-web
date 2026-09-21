@@ -12,6 +12,7 @@ export default function JoinGroup({ user }) {
 
   const [group, setGroup]   = useState(null);   // group data from Firestore
   const [status, setStatus] = useState("loading"); 
+  const [actionError, setActionError] = useState("");
   // status can be: "loading" | "found" | "already" | "joined" | "error"
 
   // ── Step 1: Fetch the group data ──
@@ -53,12 +54,16 @@ export default function JoinGroup({ user }) {
 
   // ── Step 2: Login with Google ──
   const handleLogin = async () => {
+    setActionError("");
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
       // App.jsx will detect login and re-render, user prop updates
     } catch (e) {
       console.error(e);
+      if (e.code !== "auth/popup-closed-by-user") {
+        setActionError("Sign-in failed. Check that pop-ups are allowed, then try again.");
+      }
     }
   };
 
@@ -66,6 +71,7 @@ export default function JoinGroup({ user }) {
   const handleJoin = async () => {
     if (!user || !group) return;
     setStatus("loading");
+    setActionError("");
     try {
       await updateDoc(doc(db, "groups", groupId), {
         members: arrayUnion(user.uid),
@@ -75,7 +81,8 @@ export default function JoinGroup({ user }) {
       setTimeout(() => navigate(`/groups/${groupId}`), 1500);
     } catch (e) {
       console.error(e);
-      setStatus("error");
+      setStatus("found");
+      setActionError("We couldn't add you to this group. Ask the owner to verify the invite and try again.");
     }
   };
 
@@ -107,6 +114,11 @@ export default function JoinGroup({ user }) {
           textAlign: "center",
         }}
       >
+        {actionError && (
+          <p role="alert" style={{ color: "#fca5a5", fontSize: "13px", lineHeight: 1.5, marginBottom: "18px" }}>
+            {actionError}
+          </p>
+        )}
         {/* Loading */}
         {status === "loading" && (
           <>

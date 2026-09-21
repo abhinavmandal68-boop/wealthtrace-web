@@ -1,61 +1,61 @@
-// Takes all expenses in a group and returns simplified debts
-// Example output: [{ from: "uid1", to: "uid2", amount: 450 }]
-
-export function calculateBalances(expenses, members) {
-  // Step 1: Build a balance map — how much each person has net
-  // Positive = they are owed money, Negative = they owe money
+// Calculates the minimum set of payments needed to settle a group's open items.
+// Integer cents are used throughout so repeated splits do not create rounding drift.
+export function calculateBalances(expenses = [], members = []) {
   const balance = {};
-  members.forEach((uid) => (balance[uid] = 0));
+  members.forEach((uid) => {
+    if (uid) balance[uid] = 0;
+  });
 
   expenses.forEach((expense) => {
-    if (expense.settled) return; // skip settled expenses
+    if (!expense || expense.settled) return;
 
-    const { amount, paidBy, splitAmong } = expense;
-    const splitCount = splitAmong.length;
-    if (!splitCount) return;
+    const amountInCents = Math.round(Number(expense.amount) * 100);
+    const paidBy = expense.paidBy;
+    const splitAmong = [...new Set(Array.isArray(expense.splitAmong) ? expense.splitAmong : [])]
+      .filter(Boolean);
 
-    const share = amount / splitCount;
+    if (!paidBy || !Number.isFinite(amountInCents) || amountInCents <= 0 || splitAmong.length === 0) {
+      return;
+    }
 
-    // Person who paid gets credited the full amount
-    balance[paidBy] = (balance[paidBy] || 0) + amount;
+    balance[paidBy] = (balance[paidBy] || 0) + amountInCents;
 
-    // Each person in the split gets debited their share
-    splitAmong.forEach((uid) => {
+    const baseShare = Math.floor(amountInCents / splitAmong.length);
+    const remainder = amountInCents % splitAmong.length;
+    splitAmong.forEach((uid, index) => {
+      const share = baseShare + (index < remainder ? 1 : 0);
       balance[uid] = (balance[uid] || 0) - share;
     });
   });
 
-  // Step 2: Simplify debts
-  // Separate into who is owed (creditors) and who owes (debtors)
-  const creditors = []; // people with positive balance
-  const debtors = [];   // people with negative balance
+  const creditors = [];
+  const debtors = [];
 
-  Object.entries(balance).forEach(([uid, amt]) => {
-    if (amt > 0.01)  creditors.push({ uid, amt });
-    if (amt < -0.01) debtors.push({ uid, amt: -amt }); // store as positive
+  Object.entries(balance).forEach(([uid, amountInCents]) => {
+    if (amountInCents > 0) creditors.push({ uid, amountInCents });
+    if (amountInCents < 0) debtors.push({ uid, amountInCents: -amountInCents });
   });
 
-  // Step 3: Match debtors to creditors (greedy algorithm)
   const transactions = [];
+  let debtorIndex = 0;
+  let creditorIndex = 0;
 
-  let i = 0, j = 0;
-  while (i < debtors.length && j < creditors.length) {
-    const debtor   = debtors[i];
-    const creditor = creditors[j];
-
-    const settleAmount = Math.min(debtor.amt, creditor.amt);
+  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
+    const debtor = debtors[debtorIndex];
+    const creditor = creditors[creditorIndex];
+    const settlementInCents = Math.min(debtor.amountInCents, creditor.amountInCents);
 
     transactions.push({
-      from:   debtor.uid,
-      to:     creditor.uid,
-      amount: Math.round(settleAmount * 100) / 100, // round to 2 decimals
+      from: debtor.uid,
+      to: creditor.uid,
+      amount: settlementInCents / 100,
     });
 
-    debtor.amt   -= settleAmount;
-    creditor.amt -= settleAmount;
+    debtor.amountInCents -= settlementInCents;
+    creditor.amountInCents -= settlementInCents;
 
-    if (debtor.amt < 0.01)   i++;
-    if (creditor.amt < 0.01) j++;
+    if (debtor.amountInCents === 0) debtorIndex += 1;
+    if (creditor.amountInCents === 0) creditorIndex += 1;
   }
 
   return transactions;

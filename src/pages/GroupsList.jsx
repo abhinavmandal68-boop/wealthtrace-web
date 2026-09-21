@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { db, auth } from "../firebase";
+import { db } from "../firebase";
 import {
   collection, addDoc, query, where,
   onSnapshot, serverTimestamp, doc, deleteDoc,
-  getDocs, getDoc, updateDoc, arrayUnion,
+  getDocs, updateDoc, arrayUnion, writeBatch,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -28,8 +28,7 @@ const generateCode = () => {
   return code;
 };
 
-export default function GroupsList() {
-  const user = auth.currentUser;
+export default function GroupsList({ user }) {
   const navigate = useNavigate();
 
   const [groups, setGroups] = useState([]);
@@ -41,6 +40,8 @@ export default function GroupsList() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState("");
   const [copiedId, setCopiedId] = useState(null);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
 
   // ── Listen to groups ──
   useEffect(() => {
@@ -49,9 +50,19 @@ export default function GroupsList() {
       collection(db, "groups"),
       where("members", "array-contains", user.uid)
     );
-    const unsub = onSnapshot(q, (snap) => {
-      setGroups(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setGroups(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setGroupsLoading(false);
+        setPageError("");
+      },
+      (error) => {
+        console.error(error);
+        setGroupsLoading(false);
+        setPageError("We couldn't load your groups. Check your connection and try again.");
+      }
+    );
     return () => unsub();
   }, [user]);
 
@@ -59,6 +70,7 @@ export default function GroupsList() {
   const createGroup = async () => {
     if (!groupName.trim()) return;
     setCreating(true);
+    setPageError("");
     try {
       const code = generateCode();
       const docRef = await addDoc(collection(db, "groups"), {
@@ -72,8 +84,12 @@ export default function GroupsList() {
       setGroupName("");
       setShowCreate(false);
       navigate(`/groups/${docRef.id}`);
-    } catch (e) { console.error(e); }
-    setCreating(false);
+    } catch (e) {
+      console.error(e);
+      setPageError("The group couldn't be created. Please try again.");
+    } finally {
+      setCreating(false);
+    }
   };
 
   // ── Join group by code ──
@@ -121,10 +137,16 @@ export default function GroupsList() {
   };
 
   // ── Copy group code ──
-  const copyCode = (code, groupId) => {
-    navigator.clipboard.writeText(code);
-    setCopiedId(groupId);
-    setTimeout(() => setCopiedId(null), 2000);
+  const copyCode = async (code, groupId) => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedId(groupId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (e) {
+      console.error(e);
+      setPageError(`Copy failed. The group code is ${code}.`);
+    }
   };
 
   // ── Delete group ──
@@ -134,13 +156,20 @@ export default function GroupsList() {
       const expensesSnap = await getDocs(
         query(collection(db, "groupExpenses"), where("groupId", "==", groupId))
       );
-      await Promise.all(expensesSnap.docs.map(d => deleteDoc(doc(db, "groupExpenses", d.id))));
+      for (let i = 0; i < expensesSnap.docs.length; i += 450) {
+        const batch = writeBatch(db);
+        expensesSnap.docs.slice(i, i + 450).forEach((expenseDoc) => batch.delete(expenseDoc.ref));
+        await batch.commit();
+      }
       await deleteDoc(doc(db, "groups", groupId));
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setPageError("The group couldn't be deleted. Only the group owner can delete it.");
+    }
   };
 
   return (
-    <div style={{
+    <div className="page-shell groups-page" style={{
       minHeight: "100vh",
       background: "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)",
       fontFamily: "'Outfit', sans-serif",
@@ -150,10 +179,18 @@ export default function GroupsList() {
 
       <div className="mobile-content groups-content" style={{ maxWidth: "480px", margin: "0 auto" }}>
 
+        {pageError && (
+          <div className="inline-error" role="alert">
+            <span>{pageError}</span>
+            <button onClick={() => setPageError("")} aria-label="Dismiss error">×</button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="groups-header responsive-toolbar" style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "28px" }}>
           <button
             onClick={() => navigate("/")}
+            aria-label="Back to dashboard"
             style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "12px", padding: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "white" }}
           >
             <ArrowLeft size={18} />
@@ -257,7 +294,11 @@ export default function GroupsList() {
         </AnimatePresence>
 
         {/* Groups List */}
-        {groups.length === 0 && !showCreate && !showJoin ? (
+        {groupsLoading ? (
+          <div style={{ ...glassCard, padding: "48px 24px", textAlign: "center", color: "rgba(255,255,255,0.5)" }} role="status">
+            Loading groups...
+          </div>
+        ) : groups.length === 0 && !showCreate && !showJoin ? (
           <div style={{ ...glassCard, padding: "48px 24px", textAlign: "center" }}>
             <Users size={40} color="rgba(167,139,250,0.4)" style={{ marginBottom: "16px" }} />
             <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "15px", fontWeight: "500", marginBottom: "8px" }}>No groups yet</p>
@@ -275,6 +316,7 @@ export default function GroupsList() {
               {groups.map((group) => (
                 <motion.div
                   key={group.id}
+                  className="group-list-card"
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   style={{ ...glassCard, padding: "20px 24px", cursor: "pointer", display: "flex", alignItems: "center", gap: "16px" }}
@@ -312,15 +354,16 @@ export default function GroupsList() {
                   </button>
 
                   {/* Delete button */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); deleteGroupFromList(group.id, group.name); }}
-                    style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "10px", padding: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "rgba(239,68,68,0.6)", transition: "all 0.2s ease", flexShrink: 0 }}
-                    title="Delete group"
-                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.18)"; e.currentTarget.style.color = "#f87171"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; e.currentTarget.style.color = "rgba(239,68,68,0.6)"; }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  {group.createdBy === user.uid && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteGroupFromList(group.id, group.name); }}
+                      style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "10px", padding: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "rgba(239,68,68,0.6)", transition: "all 0.2s ease", flexShrink: 0 }}
+                      title="Delete group"
+                      aria-label={`Delete ${group.name}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </motion.div>
               ))}
             </div>
