@@ -189,7 +189,10 @@ service cloud.firestore {
     }
 
     match /inviteCodes/{inviteCode} {
-      allow get: if isAuthenticated() && resource.data.active == true;
+      // Creation and legacy migration need a missing document to return
+      // exists() == false. Keep collection queries and inactive invites private.
+      allow get: if isAuthenticated() && inviteCode.matches('^[A-HJ-NP-Z2-9]{7}$') &&
+        (!exists(/databases/$(database)/documents/inviteCodes/$(inviteCode)) || resource.data.active == true);
       allow list: if false;
       allow create: if isAuthenticated() && validInvite(request.resource.data) &&
         inviteCode.matches('^[A-HJ-NP-Z2-9]{7}$') && request.resource.data.createdBy == request.auth.uid &&
