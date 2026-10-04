@@ -219,7 +219,15 @@ service cloud.firestore {
         request.resource.data.paidBy in groupData(request.resource.data.groupId).members &&
         groupData(request.resource.data.groupId).members.toSet().hasAll(request.resource.data.splitAmong.toSet()) &&
         (!('type' in request.resource.data) || request.resource.data.paidBy == request.auth.uid);
-      allow update: if false;
+      // Every current member can correct a bill, including its split after
+      // new members join. Payment records and original authorship stay intact.
+      allow update: if isGroupMember(resource.data.groupId) &&
+        validGroupExpense(request.resource.data) &&
+        !('type' in resource.data) && resource.data.settled == false &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description', 'amount', 'paidBy', 'splitAmong']) &&
+        request.resource.data.paidBy in groupData(resource.data.groupId).members &&
+        groupData(resource.data.groupId).members.toSet().hasAll(request.resource.data.splitAmong.toSet()) &&
+        request.resource.data.splitAmong.size() == request.resource.data.splitAmong.toSet().size();
       allow delete: if isAuthenticated() &&
         (resource.data.createdBy == request.auth.uid || isGroupOwner(resource.data.groupId));
     }

@@ -21,6 +21,7 @@ import {
 } from "firebase/firestore";
 import { joinGroup } from "../src/utils/groupMembership.js";
 import { calculateBalances } from "../src/utils/splitCalculator.js";
+import { editGroupExpense } from "../src/utils/groupExpenseEditor.js";
 
 let environment;
 const projectId = "demo-wealthtrace";
@@ -224,4 +225,109 @@ test("join helper cannot bypass missing or inactive invitations", async () => {
     groupId: "group-1", groupName: "Trip", createdBy: "owner", currency: "INR", active: false, createdAt: Timestamp.now(),
   }));
   await assert.rejects(joinGroup(db, "group-1", { uid: "member", displayName: "Member" }));
+});
+
+async function seedEditableExpense(extra = {}) {
+  const expense = {
+    groupId: "group-1", description: "Movie", amount: 90, paidBy: "owner", splitAmong: ["owner", "member"],
+    createdBy: "owner", createdAt: Timestamp.now(), settled: false, ...extra,
+  };
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "groups", "group-1"), {
+      name: "Trip", createdBy: "owner", members: ["owner", "member"], memberNames: { owner: "Owner", member: "Member" },
+      code: "ABCDEFG", currency: "INR", createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(db, "inviteCodes", "ABCDEFG"), {
+      groupId: "group-1", groupName: "Trip", createdBy: "owner", currency: "INR", active: true, createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(db, "groupExpenses", "expense-1"), expense);
+  });
+  return { id: "expense-1", ...expense };
+}
+
+test("a newly joined member can edit an existing bill and include themselves in its split", async () => {
+  const original = await seedEditableExpense();
+  const db = environment.authenticatedContext("new-member").firestore();
+  await joinGroup(db, "group-1", { uid: "new-member", displayName: "New Member" });
+  await editGroupExpense(db, original, {
+    description: "Movie and snacks", amount: 120, paidBy: "member", splitAmong: ["owner", "member", "new-member"],
+  });
+  const saved = (await getDoc(doc(db, "groupExpenses", "expense-1"))).data();
+  assert.equal(saved.description, "Movie and snacks");
+  assert.equal(saved.amount, 120);
+  assert.equal(saved.paidBy, "member");
+  assert.deepEqual(saved.splitAmong, ["owner", "member", "new-member"]);
+  assert.equal(saved.createdBy, "owner");
+  assert.ok(saved.createdAt.isEqual(original.createdAt));
+  assert.deepEqual(calculateBalances([saved], ["owner", "member", "new-member"]), [
+    { from: "owner", to: "member", amount: 40 },
+    { from: "new-member", to: "member", amount: 40 },
+  ]);
+});
+
+test("non-members and anonymous users cannot edit bills", async () => {
+  await seedEditableExpense();
+  for (const db of [environment.authenticatedContext("outsider").firestore(), environment.unauthenticatedContext().firestore()]) {
+    await assertFails(updateDoc(doc(db, "groupExpenses", "expense-1"), { amount: 120 }));
+  }
+});
+
+test("member edits preserve authorship, group, timestamps and payment state", async () => {
+  await seedEditableExpense();
+  const db = environment.authenticatedContext("member").firestore();
+  const ref = doc(db, "groupExpenses", "expense-1");
+  for (const changes of [
+    { createdBy: "member" }, { createdAt: Timestamp.fromMillis(1) }, { groupId: "another-group" },
+    { settled: true }, { type: "settlement" }, { note: "rewritten" }, { proofUrl: "https://example.com" },
+    { extraField: true },
+  ]) {
+    await assertFails(updateDoc(ref, changes));
+  }
+});
+
+test("member edits validate amounts, descriptions, payers and split participants", async () => {
+  await seedEditableExpense();
+  const db = environment.authenticatedContext("member").firestore();
+  const ref = doc(db, "groupExpenses", "expense-1");
+  for (const changes of [
+    { amount: 0 }, { amount: -10 }, { amount: "100" }, { amount: 1000000000001 },
+    { description: "" }, { description: "x".repeat(201) }, { paidBy: "outsider" },
+    { splitAmong: [] }, { splitAmong: ["outsider"] }, { splitAmong: ["owner", "owner"] },
+  ]) {
+    await assertFails(updateDoc(ref, changes));
+  }
+  await assertSucceeds(updateDoc(ref, { description: "Corrected movie", amount: 100 }));
+});
+
+test("settlement and legacy settled records cannot be changed through expense editing", async () => {
+  for (const extra of [{ type: "settlement" }, { settled: true }]) {
+    const original = await seedEditableExpense(extra);
+    const db = environment.authenticatedContext("member").firestore();
+    await assertFails(updateDoc(doc(db, "groupExpenses", "expense-1"), { amount: 120 }));
+    await assert.rejects(editGroupExpense(db, original, { ...original, amount: 120 }), /cannot be edited/);
+  }
+});
+
+test("an edit does not overwrite a change saved by another member", async () => {
+  const original = await seedEditableExpense();
+  const db = environment.authenticatedContext("member").firestore();
+  await assertSucceeds(updateDoc(doc(db, "groupExpenses", "expense-1"), { amount: 150 }));
+  await assert.rejects(editGroupExpense(db, original, { ...original, amount: 120 }), /Someone else edited/);
+  assert.equal((await getDoc(doc(db, "groupExpenses", "expense-1"))).data().amount, 150);
+});
+
+test("saving an expense deleted during editing does not recreate it", async () => {
+  const original = await seedEditableExpense();
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const batch = writeBatch(context.firestore());
+    batch.delete(doc(context.firestore(), "groupExpenses", "expense-1"));
+    await batch.commit();
+  });
+  const db = environment.authenticatedContext("member").firestore();
+  // A missing expense cannot be read under the member-scoped rules or rewritten.
+  await assert.rejects(editGroupExpense(db, original, { ...original, amount: 120 }));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    assert.equal((await getDoc(doc(context.firestore(), "groupExpenses", "expense-1"))).exists(), false);
+  });
 });
