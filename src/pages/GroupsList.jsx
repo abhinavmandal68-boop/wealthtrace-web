@@ -3,11 +3,12 @@ import { db } from "../firebase";
 import {
   collection, query, where,
   onSnapshot, serverTimestamp, doc,
-  getDocs, getDoc, setDoc, updateDoc, arrayUnion, writeBatch,
+  getDocs, getDoc, setDoc, writeBatch,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Users, Plus, Copy, Check, ArrowLeft, Trash2, Hash } from "lucide-react";
+import { joinGroup as joinGroupMembership } from "../utils/groupMembership";
 
 const glassCard = {
   background: "rgba(255,255,255,0.06)",
@@ -102,7 +103,7 @@ export default function GroupsList({ user }) {
 
   // ── Create group with a unique code ──
   const createGroup = async () => {
-    if (!groupName.trim()) return;
+    if (creating || !groupName.trim()) return;
     setCreating(true);
     setPageError("");
     try {
@@ -142,12 +143,12 @@ export default function GroupsList({ user }) {
 
   // ── Join group by code ──
   const joinGroup = async () => {
+    if (joining) return;
     const code = joinCode.trim().toUpperCase();
     if (code.length !== 7) { setJoinError("Code must be 7 characters"); return; }
     setJoining(true);
     setJoinError("");
     try {
-      const memberName = (user.displayName || "Member").trim().slice(0, 80) || "Member";
       const inviteSnap = await getDoc(doc(db, "inviteCodes", code));
 
       if (!inviteSnap.exists() || inviteSnap.data().active !== true) {
@@ -158,10 +159,7 @@ export default function GroupsList({ user }) {
       const groupId = inviteSnap.data().groupId;
 
       // Add user to members
-      await updateDoc(doc(db, "groups", groupId), {
-        members: arrayUnion(user.uid),
-        [`memberNames.${user.uid}`]: memberName,
-      });
+      await joinGroupMembership(db, groupId, user);
 
       setJoinCode("");
       setShowJoin(false);
@@ -307,11 +305,11 @@ export default function GroupsList({ user }) {
                 Join a group
               </p>
               <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "13px", marginBottom: "16px" }}>
-                Enter the 7-digit code shared by your friend
+                Enter the 7-character code shared by your friend
               </p>
               <input
                 type="text"
-                placeholder="e.g. GOA4821"
+                placeholder="e.g. TRP4823"
                 value={joinCode}
                 onChange={(e) => {
                   setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ""));

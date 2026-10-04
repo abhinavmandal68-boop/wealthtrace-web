@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import {
- doc, getDoc, collection, addDoc, onSnapshot,
+  doc, collection, addDoc, onSnapshot,
   query, where, serverTimestamp, deleteDoc, writeBatch,
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
@@ -47,7 +47,6 @@ export default function GroupDetail({ user }) {
 
   const [group, setGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
-  const [balances, setBalances] = useState([]);
   const [activeTab, setActiveTab] = useState("expenses");
   const [showAdd, setShowAdd] = useState(false);
 
@@ -63,23 +62,17 @@ export default function GroupDetail({ user }) {
   const [pageError, setPageError] = useState("");
 
   useEffect(() => {
-    const fetchGroup = async () => {
-      try {
-        const snap = await getDoc(doc(db, "groups", groupId));
+    return onSnapshot(
+      doc(db, "groups", groupId),
+      (snap) => {
         if (!snap.exists()) { navigate("/groups", { replace: true }); return; }
-        const data = { id: snap.id, ...snap.data() };
-        if (!data.members?.includes(user.uid)) {
-          navigate(`/join/${groupId}`, { replace: true });
-          return;
-        }
-        setGroup(data);
-        setSplitAmong(data.members || []);
-      } catch (error) {
+        setGroup({ id: snap.id, ...snap.data() });
+      },
+      (error) => {
         console.error(error);
         setPageError("We couldn't load this group. Check your connection or access.");
       }
-    };
-    fetchGroup();
+    );
   }, [groupId, navigate, user.uid]);
 
   useEffect(() => {
@@ -102,15 +95,20 @@ export default function GroupDetail({ user }) {
     return () => unsub();
   }, [groupId]);
 
-  useEffect(() => {
-    if (!group) return;
-    const result = calculateBalances(expenses, group.members || []);
-    setBalances(result);
-  }, [expenses, group]);
+  const balances = useMemo(
+    () => calculateBalances(expenses, group?.members || []),
+    [expenses, group]
+  );
+
+  const openAddExpense = () => {
+    setPaidBy(user.uid);
+    setSplitAmong(group.members || []);
+    setShowAdd(true);
+  };
 
   const addExpense = async () => {
-    const val = Number(amount);
-    if (!desc.trim() || !Number.isFinite(val) || val <= 0 || splitAmong.length === 0) return;
+    const val = Math.round(Number(amount) * 100) / 100;
+    if (adding || !desc.trim() || !Number.isFinite(val) || val < 0.01 || val > 1000000000000 || splitAmong.length === 0) return;
     setAdding(true);
     try {
       await addDoc(collection(db, "groupExpenses"), {
@@ -145,6 +143,12 @@ export default function GroupDetail({ user }) {
     if (!balance || balance.amount <= 0) return;
     const settlementId = `${balance.from}-${balance.to}`;
     if (settlingId) return;
+    const currentBalance = balances.find((item) => item.from === balance.from && item.to === balance.to);
+    if (!currentBalance || currentBalance.amount !== balance.amount) {
+      setSettlementTarget(null);
+      setPageError("This balance has changed. Review the updated amount before settling up.");
+      return;
+    }
     setSettlingId(settlementId);
     try {
       await addDoc(collection(db, "groupExpenses"), {
@@ -256,7 +260,7 @@ export default function GroupDetail({ user }) {
 
   const totalSpent = expenses
     .filter(e => !e.settled && e.type !== "settlement")
-    .reduce((sum, e) => sum + e.amount, 0);
+    .reduce((sum, e) => sum + Number(e.amount), 0);
   const currency = group.currency || "INR";
   const formatMoney = (value) => new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -318,7 +322,7 @@ export default function GroupDetail({ user }) {
             </p>
           </div>
           <button
-            onClick={() => setShowAdd(true)}
+            onClick={openAddExpense}
             style={{
               background: "linear-gradient(135deg, rgba(167,139,250,0.3), rgba(96,165,250,0.3))",
               border: "1px solid rgba(167,139,250,0.4)",
@@ -727,7 +731,7 @@ export default function GroupDetail({ user }) {
 
               <button
                 onClick={addExpense}
-                disabled={adding || !desc.trim() || !amount || splitAmong.length === 0}
+                disabled={adding || !desc.trim() || !Number.isFinite(Number(amount)) || Number(amount) < 0.01 || Number(amount) > 1000000000000 || splitAmong.length === 0}
                 style={{
                   width: "100%",
                   padding: "16px",

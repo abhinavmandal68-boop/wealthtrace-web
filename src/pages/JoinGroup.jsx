@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { arrayUnion, doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { motion } from "framer-motion";
 import { ArrowRight, CheckCircle, LogIn, Users } from "lucide-react";
 import { auth, db } from "../firebase";
+import { joinGroup } from "../utils/groupMembership";
 
 export default function JoinGroup({ user }) {
   const { groupId: inviteCode } = useParams();
@@ -59,11 +60,7 @@ export default function JoinGroup({ user }) {
     setStatus("loading");
     setActionError("");
     try {
-      const memberName = (user.displayName || "Member").trim().slice(0, 80) || "Member";
-      await updateDoc(doc(db, "groups", invite.groupId), {
-        members: arrayUnion(user.uid),
-        [`memberNames.${user.uid}`]: memberName,
-      });
+      await joinGroup(db, invite.groupId, user);
       setStatus("joined");
       window.setTimeout(() => navigate(`/groups/${invite.groupId}`), 900);
     } catch (error) {
