@@ -25,3 +25,5 @@ qa-artifacts/
 *.sw?
 .env
 node_modules
+
+.vercel

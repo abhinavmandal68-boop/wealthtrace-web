@@ -1,6 +1,7 @@
 import { doc, runTransaction } from "firebase/firestore";
 
-const editableFields = ["description", "amount", "paidBy", "splitAmong"];
+const editableFields = ["description", "amount", "paidBy", "splitAmong", "splitMode", "splitAmounts"];
+const normalized = (expense) => ({ ...expense, splitMode: expense.splitMode || "equal", splitAmounts: expense.splitAmounts || [] });
 
 export async function editGroupExpense(db, original, changes) {
   const expenseRef = doc(db, "groupExpenses", original.id);
@@ -11,9 +12,12 @@ export async function editGroupExpense(db, original, changes) {
     if (current.type === "settlement" || current.settled) {
       throw new Error("This payment record cannot be edited as an expense.");
     }
-    if (editableFields.some((field) => JSON.stringify(current[field]) !== JSON.stringify(original[field]))) {
+    const currentValues = normalized(current);
+    const originalValues = normalized(original);
+    if (editableFields.some((field) => JSON.stringify(currentValues[field]) !== JSON.stringify(originalValues[field]))) {
       throw new Error("Someone else edited this expense. Close the form and reopen it to see their changes.");
     }
-    transaction.update(expenseRef, Object.fromEntries(editableFields.map((field) => [field, changes[field]])));
+    const updatedValues = normalized(changes);
+    transaction.update(expenseRef, Object.fromEntries(editableFields.map((field) => [field, updatedValues[field]])));
   });
 }

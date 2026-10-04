@@ -1,5 +1,7 @@
 // Calculates the minimum set of payments needed to settle a group's open items.
 // Integer cents are used throughout so repeated splits do not create rounding drift.
+import { getExpenseShares } from "./expenseSplit.js";
+
 export function calculateBalances(expenses = [], members = []) {
   const balance = {};
   members.forEach((uid) => {
@@ -18,12 +20,12 @@ export function calculateBalances(expenses = [], members = []) {
       return;
     }
 
+    if (expense.splitMode === "custom" && splitAmong.length !== expense.splitAmong.length) return;
+    const shares = getExpenseShares({ ...expense, splitAmong });
+    if (!shares) return;
     balance[paidBy] = (balance[paidBy] || 0) + amountInCents;
-
-    const baseShare = Math.floor(amountInCents / splitAmong.length);
-    const remainder = amountInCents % splitAmong.length;
     splitAmong.forEach((uid, index) => {
-      const share = baseShare + (index < remainder ? 1 : 0);
+      const share = shares[index];
       balance[uid] = (balance[uid] || 0) - share;
     });
   });

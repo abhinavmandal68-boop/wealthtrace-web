@@ -331,3 +331,55 @@ test("saving an expense deleted during editing does not recreate it", async () =
     assert.equal((await getDoc(doc(context.firestore(), "groupExpenses", "expense-1"))).exists(), false);
   });
 });
+
+test("custom bills can be created and members can switch between equal and custom", async () => {
+  const original = await seedEditableExpense();
+  const db = environment.authenticatedContext("member").firestore();
+  const custom = { ...original, splitMode: "custom", splitAmounts: [3000, 6000] };
+  await editGroupExpense(db, original, custom);
+  const saved = { id: original.id, ...(await getDoc(doc(db, "groupExpenses", original.id))).data() };
+  assert.deepEqual(saved.splitAmounts, [3000, 6000]);
+  await editGroupExpense(db, saved, { ...saved, splitMode: "equal", splitAmounts: [] });
+  const { id: expenseId, ...customData } = custom;
+  await assertSucceeds(setDoc(doc(db, "groupExpenses", `${expenseId}-custom`), { ...customData, createdBy: "member" }));
+});
+
+test("malformed custom shares are denied", async () => {
+  await seedEditableExpense();
+  const db = environment.authenticatedContext("member").firestore();
+  const ref = doc(db, "groupExpenses", "expense-1");
+  for (const splitAmounts of [[2000, 2000], [-1000, 10000], [3000.5, 5999.5], [9000], ["3000", 6000], ["3000", "6000"], [true, 8999], [null, 9000], [3000, 6000, 0]]) {
+    await assertFails(updateDoc(ref, { splitMode: "custom", splitAmounts }));
+  }
+  await assertFails(updateDoc(ref, { splitMode: "percentage", splitAmounts: [] }));
+  await assertFails(updateDoc(ref, { splitMode: "equal", splitAmounts: [3000, 6000] }));
+});
+
+test("custom splits work at the full 50-member group limit", async () => {
+  const members = Array.from({ length: 50 }, (_, index) => `member-${index}`);
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "groups", "large-group"), {
+      name: "Large trip", createdBy: members[0], members,
+      memberNames: Object.fromEntries(members.map((uid) => [uid, uid])), code: "ABCDEFG", createdAt: Timestamp.now(),
+    });
+  });
+  const db = environment.authenticatedContext(members[0]).firestore();
+  await assertSucceeds(setDoc(doc(db, "groupExpenses", "large-bill"), {
+    groupId: "large-group", description: "Dinner", amount: 50, paidBy: members[0], splitAmong: members,
+    splitMode: "custom", splitAmounts: members.map(() => 100), createdBy: members[0], createdAt: Timestamp.now(), settled: false,
+  }));
+  await assertSucceeds(updateDoc(doc(db, "groupExpenses", "large-bill"), {
+    amount: 49, splitAmounts: members.map((_, index) => index === 49 ? 0 : 100),
+  }));
+  await assertFails(updateDoc(doc(db, "groupExpenses", "large-bill"), {
+    splitAmounts: members.map((_, index) => index === 49 ? -1 : index === 0 ? 101 : 100),
+  }));
+});
+
+test("custom splits accept exact cents at the supported amount limit", async () => {
+  await seedEditableExpense();
+  const db = environment.authenticatedContext("member").firestore();
+  await assertSucceeds(updateDoc(doc(db, "groupExpenses", "expense-1"), {
+    amount: 1000000000000, splitMode: "custom", splitAmounts: [100000000000000, 0],
+  }));
+});

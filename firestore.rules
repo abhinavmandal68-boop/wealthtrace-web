@@ -13,7 +13,8 @@ service cloud.firestore {
     //   optional currency for legacy compatibility.
     // inviteCodes: groupId, groupName, createdBy, currency, active, createdAt.
     // groupExpenses: groupId, description, amount, paidBy, splitAmong,
-    //   createdBy, createdAt, settled; optional type/note/proofUrl.
+    //   createdBy, createdAt, settled; optional type/note/proofUrl,
+    //   splitMode (equal/custom), splitAmounts (integer cents per splitAmong).
     // ===============================================================
 
     function isAuthenticated() {
@@ -120,9 +121,31 @@ service cloud.firestore {
         validCurrency(data.currency) && data.active is bool && data.createdAt is timestamp;
     }
 
+    // join validates non-negative whole cents in one bounded check. The numeric
+    // sum additionally rejects string-valued shares and verifies the bill total.
+    // Zero padding exists only during validation, preserving the stored list size.
+    function customSplitTotal(shares) {
+      return (shares[0] + shares[1] + shares[2] + shares[3] + shares[4] + shares[5] + shares[6] + shares[7] + shares[8] + shares[9]) +
+        (shares[10] + shares[11] + shares[12] + shares[13] + shares[14] + shares[15] + shares[16] + shares[17] + shares[18] + shares[19]) +
+        (shares[20] + shares[21] + shares[22] + shares[23] + shares[24] + shares[25] + shares[26] + shares[27] + shares[28] + shares[29]) +
+        (shares[30] + shares[31] + shares[32] + shares[33] + shares[34] + shares[35] + shares[36] + shares[37] + shares[38] + shares[39]) +
+        (shares[40] + shares[41] + shares[42] + shares[43] + shares[44] + shares[45] + shares[46] + shares[47] + shares[48] + shares[49]);
+    }
+
+    function validExpenseSplit(data) {
+      let mode = data.get('splitMode', 'equal');
+      let shares = data.get('splitAmounts', []);
+      return (mode == 'equal' && shares is list && shares.size() == 0) ||
+        (mode == 'custom' && !('type' in data) && shares is list &&
+        shares.size() == data.splitAmong.size() &&
+        data.splitAmong.size() == data.splitAmong.toSet().size() &&
+        shares.join(',').matches('^(0|[1-9][0-9]{0,14})(,(0|[1-9][0-9]{0,14}))*$') &&
+        customSplitTotal(shares.concat([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])) == math.round(data.amount * 100));
+    }
+
     function validGroupExpense(data) {
       return data.keys().hasAll(['groupId', 'description', 'amount', 'paidBy', 'splitAmong', 'createdBy', 'createdAt', 'settled']) &&
-        data.keys().hasOnly(['groupId', 'description', 'amount', 'paidBy', 'splitAmong', 'createdBy', 'createdAt', 'settled', 'type', 'note', 'proofUrl']) &&
+        data.keys().hasOnly(['groupId', 'description', 'amount', 'paidBy', 'splitAmong', 'createdBy', 'createdAt', 'settled', 'type', 'note', 'proofUrl', 'splitMode', 'splitAmounts']) &&
         validShortString(data.groupId, 1, 128) &&
         validShortString(data.description, 1, 200) &&
         data.amount is number && data.amount > 0 && data.amount <= 1000000000000 &&
@@ -130,7 +153,7 @@ service cloud.firestore {
         data.splitAmong is list && data.splitAmong.size() >= 1 && data.splitAmong.size() <= 50 &&
         validShortString(data.createdBy, 1, 128) && data.createdAt is timestamp && data.settled is bool &&
         (!('type' in data) || data.type == 'settlement') &&
-        validOptionalString(data, 'note', 200) && validOptionalUrl(data, 'proofUrl');
+        validOptionalString(data, 'note', 200) && validOptionalUrl(data, 'proofUrl') && validExpenseSplit(data);
     }
 
     function groupData(groupId) {
@@ -224,7 +247,7 @@ service cloud.firestore {
       allow update: if isGroupMember(resource.data.groupId) &&
         validGroupExpense(request.resource.data) &&
         !('type' in resource.data) && resource.data.settled == false &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description', 'amount', 'paidBy', 'splitAmong']) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description', 'amount', 'paidBy', 'splitAmong', 'splitMode', 'splitAmounts']) &&
         request.resource.data.paidBy in groupData(resource.data.groupId).members &&
         groupData(resource.data.groupId).members.toSet().hasAll(request.resource.data.splitAmong.toSet()) &&
         request.resource.data.splitAmong.size() == request.resource.data.splitAmong.toSet().size();
