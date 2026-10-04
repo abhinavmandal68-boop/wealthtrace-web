@@ -6,8 +6,9 @@ import {
   query, where, serverTimestamp, deleteDoc, writeBatch,
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Plus, Users, Receipt, TrendingDown, X, Check, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Users, Receipt, TrendingDown, X, Check, Trash2, Pencil } from "lucide-react";
 import { calculateBalances } from "../utils/splitCalculator";
+import { editGroupExpense } from "../utils/groupExpenseEditor";
 
 const glassCard = {
   background: "rgba(255,255,255,0.06)",
@@ -49,6 +50,8 @@ export default function GroupDetail({ user }) {
   const [expenses, setExpenses] = useState([]);
   const [activeTab, setActiveTab] = useState("expenses");
   const [showAdd, setShowAdd] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [editorError, setEditorError] = useState("");
 
   const [desc, setDesc] = useState("");
   const [amount, setAmount] = useState("");
@@ -101,33 +104,63 @@ export default function GroupDetail({ user }) {
   );
 
   const openAddExpense = () => {
+    setEditingExpense(null);
+    setEditorError("");
+    setDesc("");
+    setAmount("");
     setPaidBy(user.uid);
     setSplitAmong(group.members || []);
     setShowAdd(true);
   };
 
-  const addExpense = async () => {
+  const openEditExpense = (expense) => {
+    setEditingExpense(expense);
+    setEditorError("");
+    setDesc(expense.description);
+    setAmount(String(expense.amount));
+    setPaidBy(expense.paidBy);
+    setSplitAmong([...expense.splitAmong]);
+    setShowAdd(true);
+  };
+
+  const closeExpenseEditor = () => {
+    if (adding) return;
+    setShowAdd(false);
+    setEditingExpense(null);
+    setEditorError("");
+  };
+
+  const saveExpense = async () => {
     const val = Math.round(Number(amount) * 100) / 100;
     if (adding || !desc.trim() || !Number.isFinite(val) || val < 0.01 || val > 1000000000000 || splitAmong.length === 0) return;
     setAdding(true);
+    setEditorError("");
     try {
-      await addDoc(collection(db, "groupExpenses"), {
-        groupId,
+      const changes = {
         description: desc.trim(),
         amount: val,
         paidBy,
         splitAmong,
-        createdBy: user.uid,
-        createdAt: serverTimestamp(),
-        settled: false,
-      });
+      };
+      if (editingExpense) {
+        await editGroupExpense(db, editingExpense, changes);
+      } else {
+        await addDoc(collection(db, "groupExpenses"), {
+          ...changes,
+          groupId,
+          createdBy: user.uid,
+          createdAt: serverTimestamp(),
+          settled: false,
+        });
+      }
       setDesc("");
       setAmount("");
       setSplitAmong(group?.members || []);
       setShowAdd(false);
+      setEditingExpense(null);
     } catch (e) {
       console.error(e);
-      setPageError("The expense couldn't be added. Please try again.");
+      setEditorError(e.code ? "The expense couldn't be saved. Check your connection and group access, then try again." : e.message);
     } finally {
       setAdding(false);
     }
@@ -466,6 +499,17 @@ export default function GroupDetail({ user }) {
                       <p style={{ color: "#a78bfa", fontWeight: "700", fontSize: "16px", margin: 0, whiteSpace: "nowrap" }}>
                         {formatMoney(expense.amount)}
                       </p>
+                      {!expense.settled && expense.type !== "settlement" && (
+                        <button
+                          className="edit-expense-btn"
+                          onClick={() => openEditExpense(expense)}
+                          title="Edit expense"
+                          aria-label={`Edit ${expense.description}`}
+                          style={{ background: "rgba(167,139,250,0.12)", border: "1px solid rgba(167,139,250,0.3)", borderRadius: "8px", color: "#c4b5fd", padding: "7px", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "12px" }}
+                        >
+                          <Pencil size={14} /> Edit
+                        </button>
+                      )}
                       {(group.createdBy === user.uid || expense.createdBy === user.uid) && (
                         <button
                           className="del-expense-btn"
@@ -600,7 +644,7 @@ export default function GroupDetail({ user }) {
 
       </div>
 
-      {/* Add Expense Modal */}
+      {/* Add / Edit Expense Modal */}
       <AnimatePresence>
         {showAdd && (
           <>
@@ -608,7 +652,7 @@ export default function GroupDetail({ user }) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowAdd(false)}
+              onClick={closeExpenseEditor}
               style={{
                 position: "fixed",
                 inset: 0,
@@ -623,6 +667,9 @@ export default function GroupDetail({ user }) {
               exit={{ opacity: 0, y: 60 }}
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
               className="mobile-bottom-sheet"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="expense-editor-title"
               style={{
                 position: "fixed",
                 bottom: 0,
@@ -638,11 +685,13 @@ export default function GroupDetail({ user }) {
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-                <h3 style={{ color: "white", fontSize: "18px", fontWeight: "700", margin: 0 }}>
-                  Add Expense
+                <h3 id="expense-editor-title" style={{ color: "white", fontSize: "18px", fontWeight: "700", margin: 0 }}>
+                  {editingExpense ? "Edit Expense" : "Add Expense"}
                 </h3>
                 <button
-                  onClick={() => setShowAdd(false)}
+                  onClick={closeExpenseEditor}
+                  disabled={adding}
+                  aria-label="Close expense form"
                   style={{
                     background: "rgba(255,255,255,0.08)",
                     border: "1px solid rgba(255,255,255,0.12)",
@@ -657,10 +706,13 @@ export default function GroupDetail({ user }) {
                 </button>
               </div>
 
+              {editorError && <p role="alert" style={{ color: "#fca5a5", fontSize: "13px", margin: "0 0 16px" }}>{editorError}</p>}
+
               <p style={labelStyle}>What was this for?</p>
               <input
                 type="text"
                 placeholder="e.g. Dinner at Barbeque Nation"
+                aria-label="Expense description"
                 value={desc}
                 maxLength={200}
                 onChange={e => setDesc(e.target.value)}
@@ -674,6 +726,7 @@ export default function GroupDetail({ user }) {
                 step="0.01"
                 inputMode="decimal"
                 placeholder="0"
+                aria-label="Expense amount"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
                 style={inputStyle}
@@ -685,6 +738,7 @@ export default function GroupDetail({ user }) {
                   <button
                     key={uid}
                     onClick={() => setPaidBy(uid)}
+                    aria-pressed={paidBy === uid}
                     style={{
                       padding: "8px 16px",
                       background: paidBy === uid ? "rgba(167,139,250,0.25)" : "rgba(255,255,255,0.06)",
@@ -704,12 +758,16 @@ export default function GroupDetail({ user }) {
                 ))}
               </div>
 
-              <p style={labelStyle}>Split among</p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                <p style={{ ...labelStyle, margin: 0 }}>Split among</p>
+                <button onClick={() => setSplitAmong([...(group.members || [])])} style={{ background: "none", border: "none", color: "#93c5fd", fontSize: "12px", cursor: "pointer" }}>Select all members</button>
+              </div>
               <div style={{ display: "flex", gap: "8px", marginBottom: "28px", flexWrap: "wrap" }}>
                 {group.members?.map(uid => (
                   <button
                     key={uid}
                     onClick={() => toggleMember(uid)}
+                    aria-pressed={splitAmong.includes(uid)}
                     style={{
                       padding: "8px 16px",
                       background: splitAmong.includes(uid) ? "rgba(96,165,250,0.2)" : "rgba(255,255,255,0.06)",
@@ -730,7 +788,7 @@ export default function GroupDetail({ user }) {
               </div>
 
               <button
-                onClick={addExpense}
+                onClick={saveExpense}
                 disabled={adding || !desc.trim() || !Number.isFinite(Number(amount)) || Number(amount) < 0.01 || Number(amount) > 1000000000000 || splitAmong.length === 0}
                 style={{
                   width: "100%",
@@ -746,7 +804,7 @@ export default function GroupDetail({ user }) {
                   opacity: (!desc.trim() || !amount || splitAmong.length === 0) ? 0.5 : 1,
                 }}
               >
-                {adding ? "Adding..." : "Add Expense"}
+                {adding ? "Saving..." : editingExpense ? "Save Changes" : "Add Expense"}
               </button>
             </motion.div>
           </>
