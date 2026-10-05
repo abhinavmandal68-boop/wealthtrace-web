@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Plus, Users, Receipt, TrendingDown, X, Check, Trash2, Pencil } from "lucide-react";
 import { calculateBalances } from "../utils/splitCalculator";
 import { editGroupExpense } from "../utils/groupExpenseEditor";
+import { getExpenseShares, parseShareAmount } from "../utils/expenseSplit";
 
 const glassCard = {
   background: "rgba(255,255,255,0.06)",
@@ -57,6 +58,8 @@ export default function GroupDetail({ user }) {
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState(user?.uid || "");
   const [splitAmong, setSplitAmong] = useState([]);
+  const [splitMode, setSplitMode] = useState("equal");
+  const [customAmounts, setCustomAmounts] = useState({});
   const [adding, setAdding] = useState(false);
   const [settlingId, setSettlingId] = useState("");
   const [settlementTarget, setSettlementTarget] = useState(null);
@@ -102,12 +105,20 @@ export default function GroupDetail({ user }) {
     () => calculateBalances(expenses, group?.members || []),
     [expenses, group]
   );
+  const totalCents = Math.round(Number(amount) * 100);
+  const customShares = splitAmong.map((uid) => parseShareAmount(customAmounts[uid] ?? ""));
+  const customSharesValid = customShares.every(Number.isSafeInteger);
+  const allocatedCents = customSharesValid ? customShares.reduce((sum, share) => sum + share, 0) : 0;
+  const customSplitValid = splitMode === "equal" || (customSharesValid && allocatedCents === totalCents);
+  const equalShares = getExpenseShares({ amount, splitAmong }) || [];
 
   const openAddExpense = () => {
     setEditingExpense(null);
     setEditorError("");
     setDesc("");
     setAmount("");
+    setSplitMode("equal");
+    setCustomAmounts({});
     setPaidBy(user.uid);
     setSplitAmong(group.members || []);
     setShowAdd(true);
@@ -120,6 +131,10 @@ export default function GroupDetail({ user }) {
     setAmount(String(expense.amount));
     setPaidBy(expense.paidBy);
     setSplitAmong([...expense.splitAmong]);
+    setSplitMode(expense.splitMode || "equal");
+    setCustomAmounts(expense.splitMode === "custom"
+      ? Object.fromEntries(expense.splitAmong.map((uid, index) => [uid, (expense.splitAmounts[index] / 100).toFixed(2)]))
+      : {});
     setShowAdd(true);
   };
 
@@ -132,7 +147,7 @@ export default function GroupDetail({ user }) {
 
   const saveExpense = async () => {
     const val = Math.round(Number(amount) * 100) / 100;
-    if (adding || !desc.trim() || !Number.isFinite(val) || val < 0.01 || val > 1000000000000 || splitAmong.length === 0) return;
+    if (adding || !desc.trim() || !Number.isFinite(val) || val < 0.01 || val > 1000000000000 || splitAmong.length === 0 || !customSplitValid) return;
     setAdding(true);
     setEditorError("");
     try {
@@ -141,6 +156,8 @@ export default function GroupDetail({ user }) {
         amount: val,
         paidBy,
         splitAmong,
+        splitMode,
+        splitAmounts: splitMode === "custom" ? customShares : [],
       };
       if (editingExpense) {
         await editGroupExpense(db, editingExpense, changes);
@@ -170,6 +187,13 @@ export default function GroupDetail({ user }) {
     setSplitAmong(prev =>
       prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]
     );
+  };
+
+  const chooseSplitMode = (mode) => {
+    if (mode === "custom" && Object.keys(customAmounts).length === 0) {
+      setCustomAmounts(Object.fromEntries(splitAmong.map((uid, index) => [uid, ((equalShares[index] || 0) / 100).toFixed(2)])));
+    }
+    setSplitMode(mode);
   };
 
   const settleUp = async (balance) => {
@@ -490,6 +514,9 @@ export default function GroupDetail({ user }) {
                       <p style={{ color: "rgba(255,255,255,0.25)", fontSize: "11px", margin: "4px 0 0" }}>
                         Split among: {expense.splitAmong?.map(uid => getName(uid)).join(", ")}
                       </p>
+                      {expense.type !== "settlement" && <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "11px", margin: "5px 0 0" }}>
+                        {expense.splitMode === "custom" ? "Custom" : "Equal"} split: {expense.splitAmong?.map((uid, index) => `${getName(uid)} ${formatMoney((getExpenseShares(expense)?.[index] || 0) / 100)}`).join(" · ")}
+                      </p>}
                       {expense.note && <p style={{ color: "rgba(255,255,255,0.45)", fontSize: "11px", margin: "5px 0 0" }}>Note: {expense.note}</p>}
                       {expense.proofUrl && <a href={expense.proofUrl} target="_blank" rel="noreferrer" style={{ color: "#60a5fa", fontSize: "11px", display: "inline-block", marginTop: "5px" }}>View payment proof</a>}
                     </div>
@@ -680,6 +707,8 @@ export default function GroupDetail({ user }) {
                 borderRadius: "28px 28px 0 0",
                 padding: "28px 24px 40px",
                 zIndex: 51,
+                maxHeight: "90dvh",
+                overflowY: "auto",
                 maxWidth: "480px",
                 margin: "0 auto",
               }}
@@ -758,6 +787,13 @@ export default function GroupDetail({ user }) {
                 ))}
               </div>
 
+              <p style={labelStyle}>Split method</p>
+              <div role="group" aria-label="Split method" style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+                {[["equal", "Equally"], ["custom", "Custom amounts"]].map(([mode, label]) => (
+                  <button key={mode} onClick={() => chooseSplitMode(mode)} aria-pressed={splitMode === mode} style={{ flex: 1, padding: "11px 14px", borderRadius: "10px", border: `1px solid ${splitMode === mode ? "rgba(167,139,250,0.5)" : "rgba(255,255,255,0.12)"}`, background: splitMode === mode ? "rgba(167,139,250,0.25)" : "rgba(255,255,255,0.06)", color: splitMode === mode ? "white" : "rgba(255,255,255,0.55)", fontWeight: "600", cursor: "pointer" }}>{label}</button>
+                ))}
+              </div>
+
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
                 <p style={{ ...labelStyle, margin: 0 }}>Split among</p>
                 <button onClick={() => setSplitAmong([...(group.members || [])])} style={{ background: "none", border: "none", color: "#93c5fd", fontSize: "12px", cursor: "pointer" }}>Select all members</button>
@@ -787,9 +823,25 @@ export default function GroupDetail({ user }) {
                 ))}
               </div>
 
+              {splitMode === "custom" ? (
+                <div style={{ marginBottom: "24px" }}>
+                  {splitAmong.map((uid) => (
+                    <label key={uid} style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px", color: "rgba(255,255,255,0.75)", fontSize: "13px" }}>
+                      <span style={{ flex: 1 }}>{getName(uid)}</span>
+                      <input type="number" min="0" step="0.01" inputMode="decimal" aria-label={`Share for ${getName(uid)}`} placeholder="0.00" value={customAmounts[uid] ?? ""} onChange={(event) => setCustomAmounts((previous) => ({ ...previous, [uid]: event.target.value }))} style={{ ...inputStyle, width: "140px", marginBottom: 0 }} />
+                    </label>
+                  ))}
+                  <p aria-live="polite" style={{ color: customSplitValid ? "#34d399" : "#fca5a5", fontSize: "13px", margin: "12px 0 0" }}>
+                    {!customSharesValid ? "Enter a non-negative amount with up to 2 decimal places for each selected member." : `Allocated ${formatMoney(allocatedCents / 100)} of ${formatMoney(totalCents / 100)}${allocatedCents === totalCents ? " — ready to save" : allocatedCents < totalCents ? ` · ${formatMoney((totalCents - allocatedCents) / 100)} left to assign` : ` · ${formatMoney((allocatedCents - totalCents) / 100)} over the total`}`}
+                  </p>
+                </div>
+              ) : splitAmong.length > 0 && equalShares.length > 0 && (
+                <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "12px", margin: "0 0 24px" }}>{splitAmong.map((uid, index) => `${getName(uid)} ${formatMoney(equalShares[index] / 100)}`).join(" · ")}</p>
+              )}
+
               <button
                 onClick={saveExpense}
-                disabled={adding || !desc.trim() || !Number.isFinite(Number(amount)) || Number(amount) < 0.01 || Number(amount) > 1000000000000 || splitAmong.length === 0}
+                disabled={adding || !desc.trim() || !Number.isFinite(Number(amount)) || Number(amount) < 0.01 || Number(amount) > 1000000000000 || splitAmong.length === 0 || !customSplitValid}
                 style={{
                   width: "100%",
                   padding: "16px",
@@ -801,7 +853,7 @@ export default function GroupDetail({ user }) {
                   fontSize: "16px",
                   fontWeight: "700",
                   cursor: "pointer",
-                  opacity: (!desc.trim() || !amount || splitAmong.length === 0) ? 0.5 : 1,
+                  opacity: (!desc.trim() || !amount || splitAmong.length === 0 || !customSplitValid) ? 0.5 : 1,
                 }}
               >
                 {adding ? "Saving..." : editingExpense ? "Save Changes" : "Add Expense"}
