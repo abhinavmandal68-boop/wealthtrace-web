@@ -1,0 +1,4 @@
+qa-artifacts/
+*.log
+.env
+.env.*
